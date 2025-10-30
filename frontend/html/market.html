@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>市场页 - 萌铺子国际独立站</title>
+    <link href="data:," type="image/x-icon" rel="icon">
+    <link href="../css/font-awesome.min.css" rel="stylesheet">
+    <script src="../js/cdn.tailwindcss.com.js"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    primary: '#3b82f6',
+                    secondary: '#64748b',
+                    accent: '#06b6d4',
+                    dark: '#1e293b',
+                    light: '#f8fafc',
+                    success: '#10b981',
+                    danger: '#ef4444',
+                    warning: '#f59e0b'
+                },
+                fontFamily: {
+                    inter: ['Inter', 'sans-serif'],
+                    mono: ['JetBrains Mono', 'monospace']
+                }
+            }
+        }
+    }
+    </script>
+    <style type="text/tailwindcss">
+    @layer utilities {
+        .content-auto {
+            content-visibility: auto;
+        }
+    }
+    </style>
+</head>
+
+<body class="bg-gray-50 font-inter text-dark min-h-screen flex flex-col">
+    <!-- 页眉 -->
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-shopping-cart text-primary text-2xl"></i>
+                <h1 class="text-xl font-bold text-gray-800">动态供需平衡定价系统</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="index.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="现金余额跟踪系统">
+                    <i class="fa fa-home text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">首页</span>
+                </a>
+                <a href="market.html" class="bg-primary hover:bg-blue-600 p-2 rounded-full transition-colors duration-200" title="市场页">
+                    <i class="fa fa-shopping-cart text-gray-600 text-white"></i>
+                    <span class="ml-1 hidden sm:inline text-white">市场</span>
+                </a>
+                <a href="dutch_auction.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="荷兰钟拍卖系统">
+                    <i class="fa fa-gavel text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">拍卖</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-6">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-800">市场页 - 动态供需平衡定价系统</h1>
+        </div>
+
+        <!-- 现金余额 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">现金余额</h2>
+                <div id="marketLastUpdated" class="text-sm text-gray-500"></div>
+            </div>
+            <div class="flex items-end">
+                <span class="text-3xl font-bold" id="marketBalanceAmount">¥0.00</span>
+                <span class="ml-2 text-gray-500">CNY</span>
+            </div>
+        </section>
+
+        <!-- 市场参数设置 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">市场参数设置</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label for="balanceRange" class="block text-sm font-medium text-gray-700 mb-1">平衡区间系数</label>
+                    <input type="number" id="balanceRange" name="balanceRange" step="0.1" min="0.1" max="10" value="1"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                    <p class="text-xs text-gray-500 mt-1">安全区范围，小波动不计入价格调整</p>
+                </div>
+                <div>
+                    <label for="priceFluctuation" class="block text-sm font-medium text-gray-700 mb-1">价格波动系数</label>
+                    <input type="number" id="priceFluctuation" name="priceFluctuation" step="0.1" min="0.1" max="10" value="1"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                    <p class="text-xs text-gray-500 mt-1">超出安全区后，价格调整幅度</p>
+                </div>
+                <div>
+                    <label for="maxPriceChange" class="block text-sm font-medium text-gray-700 mb-1">最大价格变动系数</label>
+                    <input type="number" id="maxPriceChange" name="maxPriceChange" step="0.1" min="0.1" max="10" value="1"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                    <p class="text-xs text-gray-500 mt-1">单次价格变动的最大幅度限制</p>
+                </div>
+            </div>
+            <div class="flex justify-end mt-4">
+                <button id="saveMarketParams" class="w-full px-3 py-1 bg-primary text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors duration-200">
+                    保存参数
+                </button>
+            </div>
+        </section>
+
+        <!-- 园区制作 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">园区制作</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <h3 class="text-lg font-medium text-gray-800 mb-3">制作苹果</h3>
+                    <div class="space-y-2 mb-4">
+                        <p class="text-sm text-gray-600">能量度减少: <span class="font-medium">1</span></p>
+                        <p class="text-sm text-gray-600">饱食度减少: <span class="font-medium">1</span></p>
+                        <p class="text-sm text-gray-600">消耗时间: <span class="font-medium">1秒</span></p>
+                    </div>
+                    <button id="makeApple" class="w-full px-3 py-1 bg-success text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-success focus:ring-offset-2 transition-colors duration-200">
+                        制作苹果
+                    </button>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <h3 class="text-lg font-medium text-gray-800 mb-3">制作木材</h3>
+                    <div class="space-y-2 mb-4">
+                        <p class="text-sm text-gray-600">能量度减少: <span class="font-medium">2</span></p>
+                        <p class="text-sm text-gray-600">饱食度减少: <span class="font-medium">2</span></p>
+                        <p class="text-sm text-gray-600">消耗时间: <span class="font-medium">2秒</span></p>
+                    </div>
+                    <button id="makeWood" class="w-full px-3 py-1 bg-success text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-success focus:ring-offset-2 transition-colors duration-200">
+                        制作木材
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 背包状态 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">背包状态</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-medium text-gray-800">苹果</h3>
+                        <span id="backpackAppleCount" class="text-lg font-bold text-primary">0</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="sellApple" class="w-full px-3 py-1 bg-success text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-success focus:ring-offset-2 transition-colors duration-200">
+                            卖出
+                        </button>
+                    </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-medium text-gray-800">木材</h3>
+                        <span id="backpackWoodCount" class="text-lg font-bold text-primary">0</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="sellWood" class="w-full px-3 py-1 bg-success text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-success focus:ring-offset-2 transition-colors duration-200">
+                            卖出
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 市场货架 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">市场货架</h2>
+                <div class="flex space-x-2">
+                    <button id="refreshMarket" class="px-3 py-1 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors duration-200">
+                        <i class="fa fa-refresh"></i> 刷新
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-medium text-gray-800">苹果</h3>
+                        <div class="text-right">
+                            <div class="text-lg font-bold text-primary">¥<span id="applePrice">1.00</span></div>
+                            <div class="text-sm text-gray-500">库存: <span id="appleStock">0</span></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <div class="w-full bg-gray-200 rounded-full h-2.5">
+                            <div id="appleStockBar" class="bg-success h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-500 mb-3">
+                        市场状态: <span id="appleMarketStatus" class="font-medium">稳定</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="buyApple" class="w-full px-3 py-1 bg-primary text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors duration-200">
+                            买入
+                        </button>
+                    </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-medium text-gray-800">木材</h3>
+                        <div class="text-right">
+                            <div class="text-lg font-bold text-primary">¥<span id="woodPrice">5.00</span></div>
+                            <div class="text-sm text-gray-500">库存: <span id="woodStock">0</span></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <div class="w-full bg-gray-200 rounded-full h-2.5">
+                            <div id="woodStockBar" class="bg-success h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-500 mb-3">
+                        市场状态: <span id="woodMarketStatus" class="font-medium">稳定</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="buyWood" class="w-full px-3 py-1 bg-primary text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors duration-200">
+                            买入
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-white border-t border-gray-200 py-4">
+        <div class="container mx-auto px-4 text-center text-sm text-gray-500">
+            <p>市场页 - 动态供需平衡定价系统 - <a href="https://whois.aliyun.com/rdap/domain/mengpuzi.top" target="_blank">萌铺子国际独立站</a> 由 豆包 & TRAECN 强力驱动 &copy; 2025</p>
+        </div>
+    </footer>
+
+    <script src="../js/Market.js"></script>
+</body>
+
+</html>
