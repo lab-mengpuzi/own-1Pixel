@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>荷兰钟拍卖系统</title>
+    <link href="../css/font-awesome.min.css" rel="stylesheet">
+    <script src="../js/cdn.tailwindcss.com.js"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    primary: '#3b82f6',
+                    secondary: '#64748b',
+                    accent: '#06b6d4',
+                    dark: '#1e293b',
+                    light: '#f8fafc',
+                    success: '#10b981',
+                    danger: '#ef4444'
+                },
+                fontFamily: {
+                    inter: ['Inter', 'sans-serif'],
+                    mono: ['JetBrains Mono', 'monospace']
+                }
+            }
+        }
+    }
+    </script>
+    <style>
+    @layer utilities {
+        .content-auto {
+            content-visibility: auto;
+        }
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+    .auction-card {
+        transition: all 0.3s ease;
+    }
+    .auction-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    .price-countdown {
+        animation: pulse 2s infinite;
+    }
+    .bid-button {
+        transition: all 0.2s ease;
+    }
+    .bid-button:hover {
+        transform: scale(1.05);
+    }
+    .bid-button:active {
+        transform: scale(0.95);
+    }
+    </style>
+</head>
+
+<body class="bg-gray-50 font-inter text-dark min-h-screen flex flex-col">
+    <!-- 页眉 -->
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-gavel text-primary text-2xl"></i>
+                <h1 class="text-xl font-bold text-gray-800">荷兰钟拍卖系统</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="index.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="现金余额跟踪系统">
+                    <i class="fa fa-home text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">首页</span>
+                </a>
+                <a href="market.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="市场页">
+                    <i class="fa fa-shopping-cart text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">市场</span>
+                </a>
+                <a href="dutch_auction.html" class="bg-primary hover:bg-blue-600 p-2 rounded-full transition-colors duration-200" title="荷兰钟拍卖系统">
+                    <i class="fa fa-gavel text-gray-600 text-white"></i>
+                    <span class="ml-1 hidden sm:inline text-white">拍卖</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-6">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-800">拍卖页 - 荷兰钟拍卖系统</h1>
+        </div>
+
+        <!-- 现金余额 -->
+        <section class="mb-8 bg-white rounded-xl shadow-lg p-6 transform transition-all duration-300 hover:shadow-xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">现金余额</h2>
+                <div id="lastUpdated" class="text-sm text-gray-500"></div>
+            </div>
+            <div class="flex items-end">
+                <span class="text-3xl font-bold" id="balanceAmount">¥ 0.00</span>
+                <span class="ml-2 text-gray-500">CNY</span>
+            </div>
+        </section>
+
+        <main>
+            <!-- 卖家区域 -->
+            <section class="mb-12">
+                <h2 class="text-2xl font-semibold mb-4 text-indigo-600">卖家区域</h2>
+                
+                <!-- 创建新拍卖 -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h3 class="text-xl font-medium mb-4">创建新拍卖</h3>
+                    <form id="createAuctionForm" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- 左栏 -->
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-gray-700 mb-2">物品类型</label>
+                                    <select id="itemType" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                        <option value="apple">苹果</option>
+                                        <option value="wood">木材</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 mb-2">价格递减间隔（秒）</label>
+                                    <input type="number" id="priceDecrementInterval" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1" value="5">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 mb-2">每次递减金额</label>
+                                    <input type="number" id="priceDecrementAmount" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1" value="5">
+                                </div>
+                            </div>
+                            
+                            <!-- 右栏 -->
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-gray-700 mb-2">初始价格</label>
+                                    <input type="number" id="startPrice" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1" value="100">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 mb-2">最低价格</label>
+                                    <input type="number" id="minPrice" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1" value="10">
+                                </div>
+                                <div>
+                                    <label class="block text-gray-700 mb-2">数量</label>
+                                    <input type="number" id="quantity" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1" value="1">
+                                </div>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition">创建拍卖</button>
+                    </form>
+                </div>
+                
+                <!-- 卖家拍卖列表 -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-medium">我的拍卖</h3>
+                        <button id="refreshSellerAuctions" class="px-3 py-1 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors duration-200">
+                            <i class="fa fa-refresh"></i> 刷新
+                        </button>
+                    </div>
+                    <div id="sellerAuctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- 卖家拍卖列表将通过JavaScript动态加载 -->
+                    </div>
+                    <div id="noSellerAuctions" class="text-center py-8 text-gray-500 hidden">
+                        暂无拍卖记录
+                    </div>
+                </div>
+            </section>
+
+            <!-- 买家区域 -->
+            <section>
+                <h2 class="text-2xl font-semibold mb-4 text-indigo-600">买家区域</h2>
+                <div id="auctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- 拍卖列表将通过JavaScript动态加载 -->
+                </div>
+            </section>
+        </main>
+
+        <!-- 竞价模态框 -->
+        <div id="bidModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+            <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                <h3 class="text-xl font-semibold mb-4">提交竞价</h3>
+                <div id="bidInfo" class="mb-4">
+                    <!-- 竞价信息将通过JavaScript动态填充 -->
+                </div>
+                <form id="bidForm">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">竞价金额</label>
+                        <input type="number" id="bidAmount" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" min="1">
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" id="cancelBid" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition">取消</button>
+                        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition">提交竞价</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 提示消息 -->
+        <div id="notification" class="fixed bottom-4 right-4 bg-green-500 text-white px-6 py-3 rounded-md shadow-lg transform transition-transform duration-300 translate-y-20">
+            <span id="notificationMessage"></span>
+        </div>
+    </main>
+
+    <footer class="bg-white border-t border-gray-200 py-4">
+        <div class="container mx-auto px-4 text-center text-sm text-gray-500">
+            <p>荷兰钟拍卖系统 - <a href="https://whois.aliyun.com/rdap/domain/mengpuzi.top" target="_blank">萌铺子国际独立站</a> 由 豆包 & TRAECN 强力驱动 &copy; 2025</p>
+        </div>
+    </footer>
+
+    <script src="../js/DutchAuction.js"></script>
+</body>
+</html>
