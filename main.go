@@ -217,6 +217,9 @@ func main() {
 	http.HandleFunc("/api/dutch-auction/cancel", cancelDutchAuction)
 	http.HandleFunc("/api/dutch-auction/pause", pauseDutchAuction)
 
+	// 初始化日志记录器
+	logger.Init("")
+
 	// 记录服务器启动日志
 	logger.Info("main", fmt.Sprintf("own-1Pixel server starting on port %d", _config.Port))
 	logger.Info("main", fmt.Sprintf("Visit http://%s:%d or http://localhost:%d\n", _config.Host, _config.Port, _config.Port))
