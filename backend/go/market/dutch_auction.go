@@ -12,20 +12,20 @@ import (
 
 // 荷兰钟拍卖结构
 type DutchAuction struct {
-	ID                int             `json:"id"`
-	ItemType          string          `json:"itemType"`          // 物品类型
-	InitialPrice      float64         `json:"initialPrice"`      // 初始价格
-	CurrentPrice      float64         `json:"currentPrice"`      // 当前价格
-	MinPrice          float64         `json:"minPrice"`          // 最低价格
-	PriceDecrement    float64         `json:"priceDecrement"`    // 价格递减量
-	DecrementInterval int             `json:"decrementInterval"` // 价格递减间隔（秒）
-	Quantity          int             `json:"quantity"`          // 数量
-	StartTime         *time.Time      `json:"startTime"`         // 开始时间
-	EndTime           *time.Time      `json:"endTime"`           // 结束时间
-	Status            string          `json:"status"`            // 状态：pending, active, completed, cancelled
-	WinnerID          sql.NullInt64   `json:"winnerId"`          // 中标者ID（用户ID）
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID                int           `json:"id"`
+	ItemType          string        `json:"itemType"`          // 物品类型
+	InitialPrice      float64       `json:"initialPrice"`      // 初始价格
+	CurrentPrice      float64       `json:"currentPrice"`      // 当前价格
+	MinPrice          float64       `json:"minPrice"`          // 最低价格
+	PriceDecrement    float64       `json:"priceDecrement"`    // 价格递减量
+	DecrementInterval int           `json:"decrementInterval"` // 价格递减间隔（秒）
+	Quantity          int           `json:"quantity"`          // 数量
+	StartTime         *time.Time    `json:"startTime"`         // 开始时间
+	EndTime           *time.Time    `json:"endTime"`           // 结束时间
+	Status            string        `json:"status"`            // 状态：pending, active, completed, cancelled
+	WinnerID          sql.NullInt64 `json:"winnerId"`          // 中标者ID（用户ID）
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 // 荷兰钟竞价记录
@@ -480,14 +480,6 @@ func StartDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 处理可能为NULL的时间字段
-	if startTime.Valid {
-		auction.StartTime = &startTime.Time
-	}
-	if endTime.Valid {
-		auction.EndTime = &endTime.Time
-	}
-
 	// 检查拍卖状态
 	if auction.Status != "pending" {
 		tx.Rollback()
@@ -691,14 +683,6 @@ func PlaceDutchBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
-	}
-
-	// 处理可能为NULL的时间字段
-	if startTime.Valid {
-		auction.StartTime = &startTime.Time
-	}
-	if endTime.Valid {
-		auction.EndTime = &endTime.Time
 	}
 
 	// 检查拍卖状态
@@ -997,14 +981,6 @@ func CancelDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 处理可能为NULL的时间字段
-	if startTime.Valid {
-		auction.StartTime = &startTime.Time
-	}
-	if endTime.Valid {
-		auction.EndTime = &endTime.Time
-	}
-
 	// 检查拍卖状态
 	if auction.Status == "completed" {
 		tx.Rollback()
@@ -1216,14 +1192,6 @@ func PauseDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
-	}
-
-	// 处理可能为NULL的时间字段
-	if startTime.Valid {
-		auction.StartTime = &startTime.Time
-	}
-	if endTime.Valid {
-		auction.EndTime = &endTime.Time
 	}
 
 	// 检查拍卖状态
