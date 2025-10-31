@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"own-1Pixel/backend/go/logger"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -37,6 +39,7 @@ type Balance struct {
 
 // 初始化数据库
 func InitDatabase(db *sql.DB, dbPath string) error {
+	logger.Info("cash", fmt.Sprintf("初始化现金数据库，路径: %s\n", dbPath))
 	var err error
 
 	// 确保数据库目录存在
@@ -157,6 +160,7 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 		)
 	`)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("创建交易记录表失败: %v\n", err))
 		return err
 	}
 
@@ -169,6 +173,7 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 		)
 	`)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("创建余额表失败: %v\n", err))
 		return err
 	}
 
@@ -176,16 +181,19 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM balance").Scan(&count)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("查询余额记录数量失败: %v\n", err))
 		return err
 	}
 
 	if count == 0 {
 		_, err = db.Exec("INSERT INTO balance (amount) VALUES (0)")
 		if err != nil {
+			logger.Info("cash", fmt.Sprintf("初始化余额记录失败: %v\n", err))
 			return err
 		}
 	}
 
+	logger.Info("cash", "现金数据库初始化完成\n")
 	return nil
 }
 
@@ -193,38 +201,50 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("打开源文件失败: %v\n", err))
 		return err
 	}
 	defer sourceFile.Close()
 
 	destinationFile, err := os.Create(dst)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("创建目标文件失败: %v\n", err))
 		return err
 	}
 	defer destinationFile.Close()
 
 	_, err = io.Copy(destinationFile, sourceFile)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("复制文件内容失败: %v\n", err))
 		return err
 	}
 
 	// 复制文件权限
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("获取源文件信息失败: %v\n", err))
 		return err
 	}
-	return os.Chmod(dst, sourceInfo.Mode())
+	err = os.Chmod(dst, sourceInfo.Mode())
+	if err != nil {
+		logger.Info("cash", fmt.Sprintf("设置文件权限失败: %v\n", err))
+		return err
+	}
+	return nil
 }
 
 // 获取当前余额
 func GetBalance(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	logger.Info("cash", "获取账户余额请求\n")
 	var balance Balance
 	err := db.QueryRow("SELECT id, amount, updated_at FROM balance ORDER BY id DESC LIMIT 1").Scan(&balance.ID, &balance.Amount, &balance.UpdatedAt)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("获取账户余额失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	logger.Info("cash", fmt.Sprintf("获取账户余额成功，当前余额: %.2f\n", balance.Amount))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(balance)
 }
@@ -232,14 +252,20 @@ func GetBalance(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 // 更新余额
 func UpdateBalance(db *sql.DB, amount float64) error {
 	_, err := db.Exec("UPDATE balance SET amount = ?, updated_at = CURRENT_TIMESTAMP", amount)
-	return err
+	if err != nil {
+		logger.Info("cash", fmt.Sprintf("更新余额失败: %v\n", err))
+		return err
+	}
+	return nil
 }
 
 // 获取所有交易记录
 func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
+	logger.Info("cash", "获取交易记录请求\n")
 	// 获取所有交易记录，按交易时间升序排列以便计算余额
 	rows, err := db.Query("SELECT id, transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at FROM transactions ORDER BY transaction_time ASC")
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("获取交易记录失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -255,6 +281,7 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 
 		err := rows.Scan(&t.ID, &t.TransactionTime, &t.OurBankAccountName, &t.CounterpartyAlias, &t.OurBankName, &t.CounterpartyBank, &t.ExpenseAmount, &t.IncomeAmount, &t.Note, &t.CreatedAt)
 		if err != nil {
+			logger.Info("cash", fmt.Sprintf("扫描交易记录失败: %v\n", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -276,6 +303,7 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 		transactions[i], transactions[j] = transactions[j], transactions[i]
 	}
 
+	logger.Info("cash", fmt.Sprintf("获取交易记录成功，共 %d 条记录\n", len(transactions)))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(transactions)
 }
@@ -283,10 +311,12 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 // 添加交易记录
 func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		logger.Info("cash", fmt.Sprintf("添加交易记录请求失败，不支持的请求方法: %s\n", r.Method))
+		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
+	logger.Info("cash", "添加交易记录请求\n")
 	// 使用临时结构体来解析JSON，不包含TransactionTime字段
 	type TempTransaction struct {
 		OurBankAccountName string  `json:"our_bank_account_name"`
@@ -301,6 +331,7 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	var tempT TempTransaction
 	err := json.NewDecoder(r.Body).Decode(&tempT)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("解析交易记录JSON失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -337,6 +368,7 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		t.TransactionTime, t.OurBankAccountName, t.CounterpartyAlias, t.OurBankName, t.CounterpartyBank, t.ExpenseAmount, t.IncomeAmount, t.Note,
 	)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("插入交易记录失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -348,10 +380,12 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 更新余额
 	err = UpdateBalance(db, newBalance)
 	if err != nil {
+		logger.Info("cash", fmt.Sprintf("更新余额失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	logger.Info("cash", fmt.Sprintf("添加交易记录成功，ID: %d，金额: %.2f，新余额: %.2f\n", t.ID, t.IncomeAmount-t.ExpenseAmount, newBalance))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(t)

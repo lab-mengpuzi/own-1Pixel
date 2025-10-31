@@ -23,18 +23,21 @@ var db *sql.DB                   // 数据库对象
 func initDatabase() error {
 	err := cash.InitDatabase(db, _config.DbPath)
 	if err != nil {
+		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败: %v\n", err))
 		return err
 	}
 
 	// 初始化市场数据库
 	err = market.InitMarketDatabase(db)
 	if err != nil {
+		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败: %v\n", err))
 		return err
 	}
 
 	// 初始化荷兰钟拍卖数据库
 	err = market.InitDutchAuctionDatabase(db)
 	if err != nil {
+		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败: %v\n", err))
 		return err
 	}
 
@@ -155,15 +158,17 @@ func main() {
 	// 打开数据库连接
 	db, err = sql.Open("sqlite", _config.DbPath)
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("Failed to open database: %v\n", err))
-		fmt.Printf("Failed to open database: %v", err)
+		logger.Info("main", fmt.Sprintf("打开数据库失败: %v\n", err))
+		fmt.Printf("打开数据库失败: %v", err)
+		return
 	}
 
 	// 初始化数据库
 	err = initDatabase()
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("Failed to initialize database: %v\n", err))
-		fmt.Printf("Failed to initialize database: %v", err)
+		logger.Info("main", fmt.Sprintf("初始化数据库失败: %v\n", err))
+		fmt.Printf("初始化数据库失败: %v", err)
+		return
 	}
 	defer db.Close()
 
@@ -195,7 +200,7 @@ func main() {
 		case "POST":
 			addTransaction(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		}
 	})
 
@@ -223,17 +228,17 @@ func main() {
 	http.HandleFunc("/api/dutch-auction/pause", pauseDutchAuction)
 
 	// 记录服务器启动日志
-	logger.Info("main", fmt.Sprintf("own-1Pixel server starting on port %d\n", _config.Port))
-	logger.Info("main", fmt.Sprintf("Visit http://%s:%d or http://localhost:%d\n", _config.Host, _config.Port, _config.Port))
+	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", _config.Port))
+	logger.Info("main", fmt.Sprintf("访问 http://%s:%d 或 http://localhost:%d\n", _config.Host, _config.Port, _config.Port))
 
 	// 启动服务器
-	fmt.Printf("own-1Pixel server starting on port %d\n", _config.Port)
-	fmt.Printf("Visit http://%s:%d or http://localhost:%d\n", _config.Host, _config.Port, _config.Port)
+	fmt.Printf("own-1Pixel 启动服务器 %d\n", _config.Port)
+	fmt.Printf("访问 http://%s:%d 或 http://localhost:%d\n", _config.Host, _config.Port, _config.Port)
 
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", _config.Host, _config.Port), nil)
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("Error starting server: %v\n", err))
-		fmt.Printf("Error starting server: %v\n", err)
+		logger.Info("main", fmt.Sprintf("启动服务器错误: %v\n", err))
+		fmt.Printf("启动服务器错误: %v\n", err)
 	}
 
 	// 关闭日志系统
