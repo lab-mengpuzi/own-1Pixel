@@ -64,8 +64,6 @@ func Init(logPath string) {
 			fmt.Printf("failed to open log file: %v\n", err)
 			return
 		}
-
-		fmt.Printf("Logger initialized with log file: %s\n", logPath)
 	}
 }
 
@@ -85,7 +83,7 @@ func Info(packageName, message string) {
 	dateFormat := now.Format("2006-01-02 15:04:05.000")
 
 	// 构建日志消息
-	logMessage := fmt.Sprintf("%s [%s] %s\n", dateFormat, packageName, message)
+	logMessage := fmt.Sprintf("%s [%s] %s", dateFormat, packageName, message)
 
 	// 写入日志文件
 	_, err := logFile.WriteString(logMessage)

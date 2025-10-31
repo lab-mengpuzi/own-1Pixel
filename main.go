@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"own-1Pixel/backend/go/cash"
 	"own-1Pixel/backend/go/config"
@@ -16,10 +15,9 @@ import (
 )
 
 //go:embed frontend/*
-var frontendFS embed.FS // 静态资源二进制化
-
+var frontendFS embed.FS          // 静态资源二进制化
 var _config = config.GetConfig() // 获取配置
-var db *sql.DB
+var db *sql.DB                   // 数据库对象
 
 // 初始化数据库
 func initDatabase() error {
@@ -149,23 +147,30 @@ func getSellerDutchAuctions(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// 打开数据库连接
 	var err error
+
+	// 初始化日志记录器
+	logger.Init("")
+
+	// 打开数据库连接
 	db, err = sql.Open("sqlite", _config.DbPath)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		logger.Info("main", fmt.Sprintf("Failed to open database: %v\n", err))
+		fmt.Printf("Failed to open database: %v", err)
 	}
 
 	// 初始化数据库
 	err = initDatabase()
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Info("main", fmt.Sprintf("Failed to initialize database: %v\n", err))
+		fmt.Printf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
 
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
 	if err != nil {
+		logger.Info("main", fmt.Sprintf("处理静态资源二进制化错误: %v\n", err))
 		fmt.Printf("处理静态资源二进制化错误: %v\n", err)
 		return
 	}
@@ -217,11 +222,8 @@ func main() {
 	http.HandleFunc("/api/dutch-auction/cancel", cancelDutchAuction)
 	http.HandleFunc("/api/dutch-auction/pause", pauseDutchAuction)
 
-	// 初始化日志记录器
-	logger.Init("")
-
 	// 记录服务器启动日志
-	logger.Info("main", fmt.Sprintf("own-1Pixel server starting on port %d", _config.Port))
+	logger.Info("main", fmt.Sprintf("own-1Pixel server starting on port %d\n", _config.Port))
 	logger.Info("main", fmt.Sprintf("Visit http://%s:%d or http://localhost:%d\n", _config.Host, _config.Port, _config.Port))
 
 	// 启动服务器
@@ -230,7 +232,7 @@ func main() {
 
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", _config.Host, _config.Port), nil)
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("Error starting server: %v", err))
+		logger.Info("main", fmt.Sprintf("Error starting server: %v\n", err))
 		fmt.Printf("Error starting server: %v\n", err)
 	}
 
