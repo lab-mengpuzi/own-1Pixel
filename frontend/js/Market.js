@@ -198,7 +198,7 @@ function updateMarketUI() {
     const appleStockBar = document.getElementById('appleStockBar');
     const appleMarketStatus = document.getElementById('appleMarketStatus');
     
-    if (applePrice) applePrice.textContent = marketItems.apple.price.toFixed(2);
+    if (applePrice) applePrice.textContent = (marketItems.apple.price || 0).toFixed(2);
     if (appleStock) appleStock.textContent = marketItems.apple.stock;
     
     // 更新苹果库存条
@@ -239,7 +239,7 @@ function updateMarketUI() {
     const woodStockBar = document.getElementById('woodStockBar');
     const woodMarketStatus = document.getElementById('woodMarketStatus');
     
-    if (woodPrice) woodPrice.textContent = marketItems.wood.price.toFixed(2);
+    if (woodPrice) woodPrice.textContent = (marketItems.wood.price || 0).toFixed(2);
     if (woodStock) woodStock.textContent = marketItems.wood.stock;
     
     // 更新木材库存条
@@ -456,11 +456,11 @@ function formatCurrency(amount) {
     let formattedAmount = '';
 
     if (amount > 0) {
-        formattedAmount = `${formatNumberWithCommas(amount.toFixed(2))}`;
+        formattedAmount = `${formatNumberWithCommas((amount || 0).toFixed(2))}`;
     } else if (amount === 0) {
         formattedAmount = '-';
     } else {
-        formattedAmount = `(${formatNumberWithCommas(amount.toFixed(2))})`;
+        formattedAmount = `(${formatNumberWithCommas((amount || 0).toFixed(2))})`;
     }
     return `${currencySymbol} ${formattedAmount}`;
 }

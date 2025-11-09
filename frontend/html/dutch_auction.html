@@ -57,6 +57,24 @@
     .bid-button:active {
         transform: scale(0.95);
     }
+    .dutch-clock-container {
+        position: relative;
+        display: inline-block;
+    }
+    .clock-hand {
+        transform-origin: bottom center;
+        transition: transform 0.5s ease-in-out;
+    }
+    .price-indicator {
+        position: absolute;
+        font-size: 12px;
+        font-weight: bold;
+        transform: translate(-50%, -50%);
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 2px 4px;
+        border-radius: 3px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
     </style>
 </head>
 
@@ -171,8 +189,57 @@
             <!-- 买家区域 -->
             <section>
                 <h2 class="text-2xl font-semibold mb-4 text-indigo-600">买家区域</h2>
-                <div id="auctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- 拍卖列表将通过JavaScript动态加载 -->
+                
+                <!-- 可视化竞拍区域 -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-medium">荷兰钟可视化竞拍</h3>
+                        <div class="flex items-center space-x-2">
+                            <label class="text-sm text-gray-600">选择拍卖:</label>
+                            <select id="visualAuctionSelect" class="px-3 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="">请选择一个拍卖</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="flex flex-col lg:flex-row gap-6">
+                        <!-- 荷兰钟可视化区域 -->
+                        <div class="flex-1">
+                            <div class="bg-gray-50 rounded-lg p-4 flex justify-center items-center">
+                                <canvas id="dutchClockCanvas" width="400" height="400" class="border border-gray-300 rounded-lg shadow-inner"></canvas>
+                            </div>
+                            <div class="mt-4 text-center">
+                                <div class="text-sm text-gray-600 mb-2">当前价格: <span id="currentPrice" class="font-bold text-lg text-indigo-600">¥0.00</span></div>
+                                <div class="text-sm text-gray-600">剩余时间: <span id="remainingTime" class="font-bold">--:--</span></div>
+                            </div>
+                        </div>
+                        
+                        <!-- 竞拍信息区域 -->
+                        <div class="flex-1">
+                            <div id="visualAuctionInfo" class="bg-gray-50 rounded-lg p-4 mb-4">
+                                <h4 class="font-medium mb-2">拍卖信息</h4>
+                                <div class="text-sm text-gray-600">
+                                    <p>请选择一个拍卖以查看详情</p>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-indigo-50 rounded-lg p-4">
+                                <h4 class="font-medium mb-2">快速竞拍</h4>
+                                <p class="text-sm text-gray-600 mb-3">点击下方按钮以当前价格立即竞拍</p>
+                                <button id="quickBidButton" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
+                                    立即竞拍
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 传统文本竞拍列表 -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h3 class="text-xl font-medium mb-4">拍卖列表</h3>
+                    <div id="auctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- 拍卖列表将通过JavaScript动态加载 -->
+                    </div>
                 </div>
             </section>
         </main>
@@ -209,6 +276,8 @@
         </div>
     </footer>
 
+    <script src="../js/DutchTimerManager.js"></script>
     <script src="../js/DutchAuction.js"></script>
+    <script src="../js/DutchClockVisualizer.js"></script>
 </body>
 </html>

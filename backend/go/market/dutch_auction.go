@@ -12,6 +12,143 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// 全局变量，用于存储价格递减定时器
+var priceDecrementTimer *time.Timer
+var isTimerRunning = false
+
+// 启动价格递减定时器
+func StartPriceDecrementTimer(db *sql.DB) {
+	if isTimerRunning {
+		return
+	}
+	
+	isTimerRunning = true
+	
+	// 立即执行一次价格更新
+	updateActiveAuctionPrices(db)
+	
+	// 设置定时器，每秒执行一次价格更新
+	priceDecrementTimer = time.AfterFunc(1*time.Second, func() {
+		updateActiveAuctionPrices(db)
+		// 递归调用，保持定时器运行
+		if isTimerRunning {
+			StartPriceDecrementTimer(db)
+		}
+	})
+}
+
+// 停止价格递减定时器
+func StopPriceDecrementTimer() {
+	if priceDecrementTimer != nil {
+		priceDecrementTimer.Stop()
+	}
+	isTimerRunning = false
+}
+
+// 更新活跃拍卖的价格
+func updateActiveAuctionPrices(db *sql.DB) {
+	// 查询所有活跃的拍卖
+	rows, err := db.Query(`
+		SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
+		decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at 
+		FROM dutch_auctions WHERE status = 'active'`)
+	if err != nil {
+		logger.Info("dutch_auction", fmt.Sprintf("查询活跃拍卖失败: %v\n", err))
+		return
+	}
+	defer rows.Close()
+
+	var auctions []DutchAuction
+	for rows.Next() {
+		var auction DutchAuction
+		var startTime, endTime sql.NullTime
+		err := rows.Scan(
+			&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
+			&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
+			&auction.Quantity, &startTime, &endTime, &auction.Status,
+			&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
+		if err != nil {
+			logger.Info("dutch_auction", fmt.Sprintf("扫描拍卖数据失败: %v\n", err))
+			continue
+		}
+
+		// 处理可能为NULL的时间字段
+		if startTime.Valid {
+			auction.StartTime = &startTime.Time
+		}
+		if endTime.Valid {
+			auction.EndTime = &endTime.Time
+		}
+
+		auctions = append(auctions, auction)
+	}
+
+	// 更新每个活跃拍卖的价格
+	for _, auction := range auctions {
+		updateAuctionPrice(db, auction)
+	}
+}
+
+// 更新单个拍卖的价格
+func updateAuctionPrice(db *sql.DB, auction DutchAuction) {
+	if auction.StartTime == nil {
+		return
+	}
+
+	// 计算从开始时间到现在经过了多少个递减间隔
+	elapsedTime := time.Since(*auction.StartTime)
+	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
+
+	// 计算应该减少的价格总额
+	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
+
+	// 计算新的当前价格
+	newPrice := auction.InitialPrice - totalDecrement
+
+	// 如果新价格低于最低价格，则设置为最低价格
+	if newPrice < auction.MinPrice {
+		newPrice = auction.MinPrice
+	}
+
+	// 如果价格已经达到最低价格，则结束拍卖
+	if newPrice <= auction.MinPrice {
+		// 更新拍卖状态为已完成
+		_, err := db.Exec("UPDATE dutch_auctions SET status = 'completed', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			newPrice, auction.ID)
+		if err != nil {
+			logger.Info("dutch_auction", fmt.Sprintf("更新拍卖状态失败: %v\n", err))
+			return
+		}
+		logger.Info("dutch_auction", fmt.Sprintf("拍卖ID %d 已达到最低价格，拍卖结束\n", auction.ID))
+		
+		// 检查是否还有其他活跃的拍卖，如果没有则停止定时器
+		var activeAuctionCount int
+		err = db.QueryRow("SELECT COUNT(*) FROM dutch_auctions WHERE status = 'active'").Scan(&activeAuctionCount)
+		if err != nil {
+			logger.Info("dutch_auction", fmt.Sprintf("检查活跃拍卖数量失败: %v\n", err))
+			return
+		}
+		
+		if activeAuctionCount == 0 {
+			StopPriceDecrementTimer()
+			logger.Info("dutch_auction", "没有活跃的拍卖，停止价格递减定时器\n")
+		}
+		
+		return
+	}
+
+	// 如果价格有变化，则更新数据库
+	if newPrice != auction.CurrentPrice {
+		_, err := db.Exec("UPDATE dutch_auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			newPrice, auction.ID)
+		if err != nil {
+			logger.Info("dutch_auction", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
+			return
+		}
+		logger.Info("dutch_auction", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, auction.CurrentPrice, newPrice))
+	}
+}
+
 // 荷兰钟拍卖结构
 type DutchAuction struct {
 	ID                int           `json:"id"`
@@ -91,6 +228,166 @@ func InitDutchAuctionDatabase(db *sql.DB) error {
 	return nil
 }
 
+// 检查并锁定背包中的物品
+func LockBackpackItems(db *sql.DB, itemType string, quantity int) error {
+	// 获取当前背包
+	var backpack struct {
+		ID        int       `json:"id"`
+		Apple     int       `json:"apple"`
+		Wood      int       `json:"wood"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	
+	err := db.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
+		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("获取背包状态失败: %v", err)
+	}
+
+	// 检查背包中是否有足够的物品
+	switch itemType {
+	case "apple":
+		if backpack.Apple < quantity {
+			return fmt.Errorf("背包中的苹果数量不足，需要 %d 个，当前只有 %d 个", quantity, backpack.Apple)
+		}
+		// 更新背包中的苹果数量
+		_, err = db.Exec("UPDATE backpack SET apple = apple - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	case "wood":
+		if backpack.Wood < quantity {
+			return fmt.Errorf("背包中的木材数量不足，需要 %d 个，当前只有 %d 个", quantity, backpack.Wood)
+		}
+		// 更新背包中的木材数量
+		_, err = db.Exec("UPDATE backpack SET wood = wood - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	default:
+		return fmt.Errorf("无效的物品类型: %s", itemType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("更新背包失败: %v", err)
+	}
+
+	return nil
+}
+
+// 检查并锁定背包中的物品（事务版本）
+func LockBackpackItemsTx(tx *sql.Tx, itemType string, quantity int) error {
+	// 获取当前背包
+	var backpack struct {
+		ID        int       `json:"id"`
+		Apple     int       `json:"apple"`
+		Wood      int       `json:"wood"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	
+	err := tx.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
+		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("获取背包状态失败: %v", err)
+	}
+
+	// 检查背包中是否有足够的物品
+	switch itemType {
+	case "apple":
+		if backpack.Apple < quantity {
+			return fmt.Errorf("背包中的苹果数量不足，需要 %d 个，当前只有 %d 个", quantity, backpack.Apple)
+		}
+		// 更新背包中的苹果数量
+		_, err = tx.Exec("UPDATE backpack SET apple = apple - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	case "wood":
+		if backpack.Wood < quantity {
+			return fmt.Errorf("背包中的木材数量不足，需要 %d 个，当前只有 %d 个", quantity, backpack.Wood)
+		}
+		// 更新背包中的木材数量
+		_, err = tx.Exec("UPDATE backpack SET wood = wood - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	default:
+		return fmt.Errorf("无效的物品类型: %s", itemType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("更新背包失败: %v", err)
+	}
+
+	return nil
+}
+
+// 解锁背包中的物品（当拍卖被取消时调用）
+func UnlockBackpackItems(db *sql.DB, itemType string, quantity int) error {
+	// 获取当前背包
+	var backpack struct {
+		ID        int       `json:"id"`
+		Apple     int       `json:"apple"`
+		Wood      int       `json:"wood"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	
+	err := db.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
+		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("获取背包状态失败: %v", err)
+	}
+
+	// 更新背包中的物品数量
+	switch itemType {
+	case "apple":
+		_, err = db.Exec("UPDATE backpack SET apple = apple + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	case "wood":
+		_, err = db.Exec("UPDATE backpack SET wood = wood + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	default:
+		return fmt.Errorf("无效的物品类型: %s", itemType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("更新背包失败: %v", err)
+	}
+
+	return nil
+}
+
+// 解锁背包中的物品（事务版本，当拍卖被取消时调用）
+func UnlockBackpackItemsTx(tx *sql.Tx, itemType string, quantity int) error {
+	// 获取当前背包
+	var backpack struct {
+		ID        int       `json:"id"`
+		Apple     int       `json:"apple"`
+		Wood      int       `json:"wood"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	
+	err := tx.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
+		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("获取背包状态失败: %v", err)
+	}
+
+	// 更新背包中的物品数量
+	switch itemType {
+	case "apple":
+		_, err = tx.Exec("UPDATE backpack SET apple = apple + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	case "wood":
+		_, err = tx.Exec("UPDATE backpack SET wood = wood + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			quantity, backpack.ID)
+	default:
+		return fmt.Errorf("无效的物品类型: %s", itemType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("更新背包失败: %v", err)
+	}
+
+	return nil
+}
+
 // 创建荷兰钟拍卖
 func CreateDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("dutch_auction", "创建荷兰钟拍卖请求\n")
@@ -144,6 +441,15 @@ func CreateDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Info("dutch_auction", fmt.Sprintf("启动事务失败: %v\n", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 检查并锁定背包中的物品
+	err = LockBackpackItemsTx(tx, auction.ItemType, auction.Quantity)
+	if err != nil {
+		logger.Info("dutch_auction", fmt.Sprintf("锁定背包物品失败: %v\n", err))
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -635,6 +941,10 @@ func StartDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("dutch_auction", fmt.Sprintf("启动荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", updatedAuction.ID, updatedAuction.ItemType, updatedAuction.Quantity))
+	
+	// 启动价格递减定时器
+	StartPriceDecrementTimer(db)
+	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -967,6 +1277,10 @@ func PlaceDutchBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	logger.Info("dutch_auction", fmt.Sprintf("提交荷兰钟竞价成功，ID: %d，价格: %.2f，物品类型: %s，数量: %d\n", newBid.ID, currentPrice, auction.ItemType, auction.Quantity))
+	
+	// 停止价格递减定时器
+	StopPriceDecrementTimer()
+	
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"bid":     newBid,
@@ -1083,6 +1397,19 @@ func CancelDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 解锁背包中的物品
+	err = UnlockBackpackItemsTx(tx, auction.ItemType, auction.Quantity)
+	if err != nil {
+		logger.Info("dutch_auction", fmt.Sprintf("取消荷兰钟拍卖，解锁背包物品失败: %v\n", err))
+		tx.Rollback()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("解锁背包物品失败: %v", err),
+		})
+		return
+	}
+
 	// 提交事务
 	err = tx.Commit()
 	if err != nil {
@@ -1096,10 +1423,14 @@ func CancelDutchAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("dutch_auction", fmt.Sprintf("取消荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", auction.ID, auction.ItemType, auction.Quantity))
+	
+	// 停止价格递减定时器
+	StopPriceDecrementTimer()
+	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": "拍卖已取消",
+		"message": "拍卖已取消，物品已返还到背包",
 	})
 }
 

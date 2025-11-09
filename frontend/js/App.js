@@ -264,11 +264,11 @@ function formatCurrency(amount) {
     let formattedAmount = '';
 
     if (amount > 0) {
-        formattedAmount = `${formatNumberWithCommas(amount.toFixed(2))}`;
+        formattedAmount = `${formatNumberWithCommas((amount || 0).toFixed(2))}`;
     } else if (amount === 0) {
         formattedAmount = '-';
     } else {
-        formattedAmount = `(${formatNumberWithCommas(amount.toFixed(2))})`;
+        formattedAmount = `(${formatNumberWithCommas((amount || 0).toFixed(2))})`;
     }
     return `${currencySymbol} ${formattedAmount}`;
 }
