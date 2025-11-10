@@ -79,8 +79,27 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) handleAuctionPrice
 
 // 更新活跃拍卖的价格
 func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctionPrices() {
+	// 使用事务来减少数据库锁定时间
+	tx, err := auctionWSPriceUpdateManager.db.Begin()
+	if err != nil {
+		logger.Info("auction_price_update_manager", fmt.Sprintf("开始事务失败: %v\n", err))
+		return
+	}
+	defer func() {
+		// 如果发生错误，回滚事务
+		if err != nil {
+			tx.Rollback()
+		} else {
+			// 提交事务
+			err = tx.Commit()
+			if err != nil {
+				logger.Info("auction_price_update_manager", fmt.Sprintf("提交事务失败: %v\n", err))
+			}
+		}
+	}()
+
 	// 查询所有活跃的拍卖
-	rows, err := auctionWSPriceUpdateManager.db.Query(`
+	rows, err := tx.Query(`
 		SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
 		decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at 
 		FROM auctions WHERE status = 'active'`)
@@ -94,13 +113,13 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctio
 	for rows.Next() {
 		var auction Auction
 		var startTime, endTime sql.NullTime
-		err := rows.Scan(
+		scanErr := rows.Scan(
 			&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
 			&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
 			&auction.Quantity, &startTime, &endTime, &auction.Status,
 			&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
-		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("扫描拍卖数据失败: %v\n", err))
+		if scanErr != nil {
+			logger.Info("auction_price_update_manager", fmt.Sprintf("扫描拍卖数据失败: %v\n", scanErr))
 			continue
 		}
 
@@ -117,7 +136,12 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctio
 
 	// 更新每个活跃拍卖的价格
 	for _, auction := range auctions {
-		auctionWSPriceUpdateManager.updateAuctionPrice(auction)
+		// 在事务内更新价格
+		err = auctionWSPriceUpdateManager.updateAuctionPrice(tx, auction)
+		if err != nil {
+			logger.Info("auction_price_update_manager", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
+			continue
+		}
 	}
 
 	// 检查是否还有活跃的拍卖，如果没有则停止价格更新管理器
@@ -126,18 +150,18 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctio
 	}
 }
 
-// 更新单个拍卖的价格
-func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice(auction Auction) {
+// 在事务内更新单个拍卖的价格
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice(tx *sql.Tx, auction Auction) error {
 	if auction.StartTime == nil {
-		return
+		return nil
 	}
 
 	// 计算从开始时间到现在经过了多少个递减间隔
 	elapsedTime := time.Since(*auction.StartTime)
 	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
 
-	// 计算应该减少的价格总额
-	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
+	// 实现逐刻度递减：每次递减1个单位
+	totalDecrement := float64(intervalsPassed) * 1.0
 
 	// 计算新的当前价格
 	newPrice := auction.InitialPrice - totalDecrement
@@ -150,42 +174,38 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 	// 如果价格已经达到最低价格，则结束拍卖
 	if newPrice <= auction.MinPrice {
 		// 更新拍卖状态为已完成
-		_, err := auctionWSPriceUpdateManager.db.Exec("UPDATE auctions SET status = 'completed', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		_, err := tx.Exec("UPDATE auctions SET status = 'completed', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
 		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("更新拍卖状态失败: %v\n", err))
-			return
+			return err
 		}
 
 		// 获取更新后的拍卖信息
 		updatedAuction, err := GetAuctionID(auctionWSPriceUpdateManager.db, auction.ID)
 		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("获取更新后的拍卖信息失败: %v\n", err))
-			return
+			return err
 		}
 
 		// 广播拍卖更新
 		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(updatedAuction, "completed")
 
 		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 已达到最低价格，拍卖结束\n", auction.ID))
-		return
+		return nil
 	}
 
 	// 如果价格有变化，则更新数据库
 	if newPrice != auction.CurrentPrice {
 		oldPrice := auction.CurrentPrice
-		_, err := auctionWSPriceUpdateManager.db.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		_, err := tx.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
 		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
-			return
+			return err
 		}
 
 		// 获取更新后的拍卖信息
 		updatedAuction, err := GetAuctionID(auctionWSPriceUpdateManager.db, auction.ID)
 		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("获取更新后的拍卖信息失败: %v\n", err))
-			return
+			return err
 		}
 
 		// 计算剩余时间
@@ -199,6 +219,8 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 
 		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, oldPrice, newPrice))
 	}
+
+	return nil
 }
 
 // 计算拍卖剩余时间（秒）

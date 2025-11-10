@@ -178,8 +178,8 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 	elapsedTime := time.Since(*auction.StartTime)
 	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
 
-	// 计算应该减少的价格总额
-	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
+	// 实现逐刻度递减：每次递减1个单位
+	totalDecrement := float64(intervalsPassed) * 1.0
 
 	// 计算新的当前价格
 	newPrice := auction.InitialPrice - totalDecrement
@@ -1580,92 +1580,114 @@ func PauseAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 开始事务
-	tx, err := db.Begin()
-	if err != nil {
-		logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，事务开始失败: %v\n", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "事务开始失败",
-		})
-		return
-	}
-
-	// 检查拍卖是否存在
-	var auction Auction
-	var startTime, endTime sql.NullTime
-	err = tx.QueryRow(`
-		SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
-		decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at 
-		FROM auctions WHERE id = ?`, data.AuctionID).Scan(
-		&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
-		&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
-		&auction.Quantity, &startTime, &endTime, &auction.Status,
-		&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖失败，拍卖ID %d 不存在\n", data.AuctionID))
-			tx.Rollback()
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"message": "拍卖不存在",
-			})
-		} else {
-			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，获取拍卖信息失败: %v\n", err))
-			tx.Rollback()
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"message": "数据库查询失败",
-			})
+	// 添加重试机制，最多重试3次
+	maxRetries := 3
+	for retry := 0; retry < maxRetries; retry++ {
+		// 开始事务
+		tx, err := db.Begin()
+		if err != nil {
+			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，事务开始失败: %v\n", err))
+			if retry == maxRetries-1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "事务开始失败",
+				})
+				return
+			}
+			time.Sleep(time.Duration(retry+1) * 100 * time.Millisecond) // 指数退避
+			continue
 		}
-		return
-	}
 
-	// 检查拍卖状态
-	if auction.Status != "active" {
-		logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖失败，拍卖ID %d 状态不是活跃状态\n", data.AuctionID))
-		tx.Rollback()
-		w.WriteHeader(http.StatusBadRequest)
+		// 检查拍卖是否存在
+		var auction Auction
+		var startTime, endTime sql.NullTime
+		err = tx.QueryRow(`
+			SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
+			decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at 
+			FROM auctions WHERE id = ?`, data.AuctionID).Scan(
+			&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
+			&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
+			&auction.Quantity, &startTime, &endTime, &auction.Status,
+			&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
+		if err != nil {
+			tx.Rollback()
+			if err == sql.ErrNoRows {
+				logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖失败，拍卖ID %d 不存在\n", data.AuctionID))
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "拍卖不存在",
+				})
+			} else {
+				logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，获取拍卖信息失败: %v\n", err))
+				if retry == maxRetries-1 {
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"success": false,
+						"message": "数据库查询失败",
+					})
+					return
+				}
+				time.Sleep(time.Duration(retry+1) * 100 * time.Millisecond) // 指数退避
+				continue
+			}
+			return
+		}
+
+		// 检查拍卖状态
+		if auction.Status != "active" {
+			tx.Rollback()
+			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖失败，拍卖ID %d 状态不是活跃状态\n", data.AuctionID))
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "拍卖ID不是活跃状态",
+			})
+			return
+		}
+
+		// 更新拍卖状态为待开始
+		_, err = tx.Exec("UPDATE auctions SET status = 'pending', start_time = NULL, end_time = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", data.AuctionID)
+		if err != nil {
+			tx.Rollback()
+			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，更新拍卖状态失败: %v\n", err))
+			if retry == maxRetries-1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "更新拍卖状态失败",
+				})
+				return
+			}
+			time.Sleep(time.Duration(retry+1) * 100 * time.Millisecond) // 指数退避
+			continue
+		}
+
+		// 提交事务
+		err = tx.Commit()
+		if err != nil {
+			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，事务提交失败: %v\n", err))
+			if retry == maxRetries-1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "事务提交失败",
+				})
+				return
+			}
+			time.Sleep(time.Duration(retry+1) * 200 * time.Millisecond) // 指数退避，时间稍长
+			continue
+		}
+
+		// 事务成功提交，退出重试循环
+		logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", auction.ID, auction.ItemType, auction.Quantity))
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "拍卖ID不是活跃状态",
+			"success": true,
+			"message": "拍卖已成功暂停",
 		})
 		return
 	}
-
-	// 更新拍卖状态为待开始
-	_, err = tx.Exec("UPDATE auctions SET status = 'pending', start_time = NULL, end_time = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", data.AuctionID)
-	if err != nil {
-		logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，更新拍卖状态失败: %v\n", err))
-		tx.Rollback()
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "更新拍卖状态失败",
-		})
-		return
-	}
-
-	// 提交事务
-	err = tx.Commit()
-	if err != nil {
-		logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，事务提交失败: %v\n", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "事务提交失败",
-		})
-		return
-	}
-
-	logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", auction.ID, auction.ItemType, auction.Quantity))
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "拍卖已成功暂停",
-	})
 }
 
 // 更新荷兰钟拍卖价格（定时任务调用）
