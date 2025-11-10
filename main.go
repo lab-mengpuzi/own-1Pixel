@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"own-1Pixel/backend/go/cash"
@@ -15,9 +18,11 @@ import (
 )
 
 //go:embed frontend/*
-var frontendFS embed.FS          // 静态资源二进制化
-var _config = config.GetConfig() // 获取配置
-var db *sql.DB                   // 数据库对象
+var frontendFS embed.FS                                         // 静态资源二进制化
+var _config = config.GetConfig()                                // 获取配置
+var db *sql.DB                                                  // 数据库对象
+var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
+var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
 
 // 初始化数据库
 func initDatabase() error {
@@ -35,7 +40,7 @@ func initDatabase() error {
 	}
 
 	// 初始化荷兰钟拍卖数据库
-	err = market.InitDutchAuctionDatabase(db)
+	err = market.InitAuctionDatabase(db)
 	if err != nil {
 		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败: %v\n", err))
 		return err
@@ -110,43 +115,161 @@ func buyWood(w http.ResponseWriter, r *http.Request) {
 }
 
 // 创建荷兰钟拍卖
-func createDutchAuction(w http.ResponseWriter, r *http.Request) {
-	market.CreateDutchAuction(db, w, r)
+func createAuction(w http.ResponseWriter, r *http.Request) {
+	market.CreateAuction(db, w, r)
+
+	// 通过WebSocket广播拍卖列表更新
+	if auctionWSManager != nil {
+		auctions, err := market.GetActiveAuctions(db)
+		if err == nil && len(auctions) > 0 {
+			// 广播最新创建的拍卖
+			auctionWSManager.BroadcastAuctionWSUpdate(&auctions[0], "created")
+		}
+	}
 }
 
 // 获取所有荷兰钟拍卖
-func getDutchAuctions(w http.ResponseWriter, r *http.Request) {
-	market.GetDutchAuctions(db, w, r)
+func getAuctions(w http.ResponseWriter, r *http.Request) {
+	market.GetAuctions(db, w, r)
 }
 
 // 获取单个荷兰钟拍卖
-func getDutchAuction(w http.ResponseWriter, r *http.Request) {
-	market.GetDutchAuction(db, w, r)
+func getAuction(w http.ResponseWriter, r *http.Request) {
+	market.GetAuction(db, w, r)
 }
 
 // 开始荷兰钟拍卖
-func startDutchAuction(w http.ResponseWriter, r *http.Request) {
-	market.StartDutchAuction(db, w, r)
+func startAuction(w http.ResponseWriter, r *http.Request) {
+	// 先从请求中获取拍卖ID
+	var data struct {
+		AuctionID int `json:"auction_id"`
+	}
+	var auctionID int
+	
+	// 尝试解析请求体获取拍卖ID
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		if err := json.Unmarshal(body, &data); err == nil {
+			auctionID = data.AuctionID
+		}
+	}
+	
+	// 重置请求体，以便market.StartAuction可以读取
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	
+	// 调用market.StartAuction
+	market.StartAuction(db, w, r)
+
+	// 通过WebSocket广播拍卖更新
+	if auctionWSManager != nil && auctionID > 0 {
+		auction, err := market.GetAuctionID(db, auctionID)
+		if err == nil {
+			auctionWSManager.BroadcastAuctionWSUpdate(auction, "started")
+
+			// 启动价格更新管理器
+			if auctionPriceUpdateManager != nil && !auctionPriceUpdateManager.IsRunning() {
+				auctionPriceUpdateManager.StartAuctionWSPriceUpdateManager()
+			}
+		}
+	}
 }
 
 // 提交荷兰钟竞价
-func placeDutchBid(w http.ResponseWriter, r *http.Request) {
-	market.PlaceDutchBid(db, w, r)
+func CommitAuctionBid(w http.ResponseWriter, r *http.Request) {
+	// 先从请求中获取拍卖ID
+	var data struct {
+		AuctionID int `json:"auction_id"`
+	}
+	var auctionID int
+	
+	// 尝试解析请求体获取拍卖ID
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		if err := json.Unmarshal(body, &data); err == nil {
+			auctionID = data.AuctionID
+		}
+	}
+	
+	// 重置请求体，以便market.CommitAuctionBid可以读取
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	
+	// 调用market.CommitAuctionBid
+	market.CommitAuctionBid(db, w, r)
+
+	// 通过WebSocket广播拍卖更新
+	if auctionWSManager != nil && auctionID > 0 {
+		auction, err := market.GetAuctionID(db, auctionID)
+		if err == nil {
+			auctionWSManager.BroadcastAuctionWSUpdate(auction, "bid_placed")
+		}
+	}
 }
 
 // 取消荷兰钟拍卖
-func cancelDutchAuction(w http.ResponseWriter, r *http.Request) {
-	market.CancelDutchAuction(db, w, r)
+func cancelAuction(w http.ResponseWriter, r *http.Request) {
+	// 先从请求中获取拍卖ID
+	var data struct {
+		AuctionID int `json:"auction_id"`
+	}
+	var auctionID int
+	
+	// 尝试解析请求体获取拍卖ID
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		if err := json.Unmarshal(body, &data); err == nil {
+			auctionID = data.AuctionID
+		}
+	}
+	
+	// 重置请求体，以便market.CancelAuction可以读取
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	
+	// 调用market.CancelAuction
+	market.CancelAuction(db, w, r)
+
+	// 通过WebSocket广播拍卖更新
+	if auctionWSManager != nil && auctionID > 0 {
+		auction, err := market.GetAuctionID(db, auctionID)
+		if err == nil {
+			auctionWSManager.BroadcastAuctionWSUpdate(auction, "cancelled")
+		}
+	}
 }
 
-// 暂停荷兰钟拍卖（下架）
-func pauseDutchAuction(w http.ResponseWriter, r *http.Request) {
-	market.PauseDutchAuction(db, w, r)
+// 暂停荷兰钟拍卖
+func pauseAuction(w http.ResponseWriter, r *http.Request) {
+	// 先从请求中获取拍卖ID
+	var data struct {
+		AuctionID int `json:"auction_id"`
+	}
+	var auctionID int
+	
+	// 尝试解析请求体获取拍卖ID
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		if err := json.Unmarshal(body, &data); err == nil {
+			auctionID = data.AuctionID
+		}
+	}
+	
+	// 重置请求体，以便market.PauseAuction可以读取
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	
+	// 调用market.PauseAuction
+	market.PauseAuction(db, w, r)
+
+	// 通过WebSocket广播拍卖更新
+	if auctionWSManager != nil && auctionID > 0 {
+		auction, err := market.GetAuctionID(db, auctionID)
+		if err == nil {
+			auctionWSManager.BroadcastAuctionWSUpdate(auction, "paused")
+		}
+	}
 }
 
 // 获取卖家荷兰钟拍卖列表
-func getSellerDutchAuctions(w http.ResponseWriter, r *http.Request) {
-	market.GetSellerDutchAuctions(db, w, r)
+func getSellerAuctions(w http.ResponseWriter, r *http.Request) {
+	market.GetSellerAuctions(db, w, r)
 }
 
 func main() {
@@ -171,6 +294,12 @@ func main() {
 		return
 	}
 	defer db.Close()
+
+	// 初始化WebSocket管理器
+	auctionWSManager = market.InitAuctionWSManager(db)
+
+	// 初始化价格更新管理器
+	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
 
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
@@ -218,14 +347,17 @@ func main() {
 	http.HandleFunc("/api/market/buy-wood", buyWood)
 
 	// 荷兰钟拍卖相关路由
-	http.HandleFunc("/api/dutch-auction/create", createDutchAuction)
-	http.HandleFunc("/api/dutch-auction/list", getDutchAuctions)
-	http.HandleFunc("/api/dutch-auction/seller-list", getSellerDutchAuctions)
-	http.HandleFunc("/api/dutch-auction/get", getDutchAuction)
-	http.HandleFunc("/api/dutch-auction/start", startDutchAuction)
-	http.HandleFunc("/api/dutch-auction/bid", placeDutchBid)
-	http.HandleFunc("/api/dutch-auction/cancel", cancelDutchAuction)
-	http.HandleFunc("/api/dutch-auction/pause", pauseDutchAuction)
+	http.HandleFunc("/api/auction/create", createAuction)
+	http.HandleFunc("/api/auction/list", getAuctions)
+	http.HandleFunc("/api/auction/seller-list", getSellerAuctions)
+	http.HandleFunc("/api/auction/get", getAuction)
+	http.HandleFunc("/api/auction/start", startAuction)
+	http.HandleFunc("/api/auction/bid", CommitAuctionBid)
+	http.HandleFunc("/api/auction/cancel", cancelAuction)
+	http.HandleFunc("/api/auction/pause", pauseAuction)
+
+	// WebSocket端点
+	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
 
 	// 记录服务器启动日志
 	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", _config.Port))

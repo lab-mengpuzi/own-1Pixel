@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>荷兰钟拍卖系统</title>
+    <title>拍卖页 - 荷兰钟拍卖系统</title>
+    <link href="data:," type="image/x-icon" rel="icon">
     <link href="../css/font-awesome.min.css" rel="stylesheet">
     <script src="../js/cdn.tailwindcss.com.js"></script>
     <script>
@@ -45,9 +46,6 @@
         transform: translateY(-5px);
         box-shadow: 0 10px 20px rgba(0,0,0,0.1);
     }
-    .price-countdown {
-        animation: pulse 2s infinite;
-    }
     .bid-button {
         transition: all 0.2s ease;
     }
@@ -56,6 +54,24 @@
     }
     .bid-button:active {
         transform: scale(0.95);
+    }
+    .dutch-clock-container {
+        position: relative;
+        display: inline-block;
+    }
+    .clock-hand {
+        transform-origin: bottom center;
+        transition: transform 0.5s ease-in-out;
+    }
+    .price-indicator {
+        position: absolute;
+        font-size: 12px;
+        font-weight: bold;
+        transform: translate(-50%, -50%);
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 2px 4px;
+        border-radius: 3px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     </style>
 </head>
@@ -88,6 +104,17 @@
     <main class="flex-grow container mx-auto px-4 py-6">
         <div class="flex justify-between items-center mb-6">
             <h1 class="text-2xl font-bold text-gray-800">拍卖页 - 荷兰钟拍卖系统</h1>
+            <!-- WebSocket连接状态指示器 -->
+            <div class="flex items-center space-x-2">
+                <span class="text-sm text-gray-600">连接状态:</span>
+                <div id="wsStatusIndicator" class="flex items-center space-x-2 px-3 py-1 rounded-full bg-gray-100">
+                    <div id="wsStatusDot" class="w-3 h-3 rounded-full bg-gray-400"></div>
+                    <span id="wsStatusText" class="text-sm font-medium text-gray-600">未连接</span>
+                </div>
+                <button id="wsReconnectBtn" class="hidden px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                    重新连接
+                </button>
+            </div>
         </div>
 
         <!-- 现金余额 -->
@@ -171,8 +198,13 @@
             <!-- 买家区域 -->
             <section>
                 <h2 class="text-2xl font-semibold mb-4 text-indigo-600">买家区域</h2>
-                <div id="auctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- 拍卖列表将通过JavaScript动态加载 -->
+                
+                <!-- 拍卖列表 -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h3 class="text-xl font-medium mb-4">拍卖列表</h3>
+                    <div id="auctionsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- 拍卖列表将通过JavaScript动态加载 -->
+                    </div>
                 </div>
             </section>
         </main>
@@ -209,6 +241,9 @@
         </div>
     </footer>
 
-    <script src="../js/DutchAuction.js"></script>
+    <script src="../js/AuctionTimerManager.js"></script>
+    <script src="../js/AuctionWebSocketManager.js"></script>
+    <script src="../js/AuctionClockVisualizer.js"></script>
+    <script src="../js/Auction.js"></script>
 </body>
 </html>

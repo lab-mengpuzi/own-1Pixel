@@ -235,18 +235,27 @@ func copyFile(src, dst string) error {
 
 // 获取当前余额
 func GetBalance(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
 	logger.Info("cash", "获取账户余额请求\n")
 	var balance Balance
 	err := db.QueryRow("SELECT id, amount, updated_at FROM balance ORDER BY id DESC LIMIT 1").Scan(&balance.ID, &balance.Amount, &balance.UpdatedAt)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("获取账户余额失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取账户余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	logger.Info("cash", fmt.Sprintf("获取账户余额成功，当前余额: %.2f\n", balance.Amount))
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(balance)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"balance": balance,
+	})
 }
 
 // 更新余额
@@ -261,12 +270,19 @@ func UpdateBalance(db *sql.DB, amount float64) error {
 
 // 获取所有交易记录
 func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
 	logger.Info("cash", "获取交易记录请求\n")
 	// 获取所有交易记录，按交易时间升序排列以便计算余额
 	rows, err := db.Query("SELECT id, transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at FROM transactions ORDER BY transaction_time ASC")
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("获取交易记录失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取交易记录失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 	defer rows.Close()
@@ -282,7 +298,12 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 		err := rows.Scan(&t.ID, &t.TransactionTime, &t.OurBankAccountName, &t.CounterpartyAlias, &t.OurBankName, &t.CounterpartyBank, &t.ExpenseAmount, &t.IncomeAmount, &t.Note, &t.CreatedAt)
 		if err != nil {
 			logger.Info("cash", fmt.Sprintf("扫描交易记录失败: %v\n", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "扫描交易记录失败",
+				"error":   err.Error(),
+			})
 			return
 		}
 
@@ -304,15 +325,23 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 	}
 
 	logger.Info("cash", fmt.Sprintf("获取交易记录成功，共 %d 条记录\n", len(transactions)))
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(transactions)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"transactions": transactions,
+	})
 }
 
 // 添加交易记录
 func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
 	if r.Method != "POST" {
 		logger.Info("cash", fmt.Sprintf("添加交易记录请求失败，不支持的请求方法: %s\n", r.Method))
-		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
 		return
 	}
 
@@ -332,7 +361,12 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&tempT)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("解析交易记录JSON失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "解析交易记录JSON失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -369,7 +403,12 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("插入交易记录失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "插入交易记录失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -381,12 +420,20 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	err = UpdateBalance(db, newBalance)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("更新余额失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	logger.Info("cash", fmt.Sprintf("添加交易记录成功，ID: %d，金额: %.2f，新余额: %.2f\n", t.ID, t.IncomeAmount-t.ExpenseAmount, newBalance))
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(t)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"message":     "交易记录添加成功",
+		"transaction": t,
+	})
 }
