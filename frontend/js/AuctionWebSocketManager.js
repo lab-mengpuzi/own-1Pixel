@@ -10,8 +10,10 @@ class AuctionWebSocketManager {
         this.reconnectInterval = 3000; // 3秒
         this.heartbeatInterval = null;
         this.heartbeatTimeout = null;
-        this.heartbeatIntervalTime = 30000; // 30秒心跳
-        this.heartbeatTimeoutTime = 10000; // 10秒心跳超时（增加超时时间）
+        this.heartbeatIntervalTime = 20000; // 20秒心跳，比服务器更频繁
+        this.heartbeatTimeoutTime = 15000; // 15秒心跳超时，给服务器足够时间响应
+        this.connectionCheckInterval = null; // 连接健康检查定时器
+        this.connectionCheckIntervalTime = 60000; // 60秒检查一次连接健康状态
         this.messageHandlers = new Map();
         this.connectionCallbacks = [];
         this.isPageVisible = true;
@@ -111,8 +113,23 @@ class AuctionWebSocketManager {
         }
 
         try {
+            // 记录发送开始时间
+            const sendStartTime = performance.now();
+            
             const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
             this.socket.send(messageStr);
+            
+            // 计算并记录发送时间差
+            const sendDuration = performance.now() - sendStartTime;
+            
+            // 当毫秒小于1时，使用微秒级精度
+            if (sendDuration < 1) {
+                const microDuration = sendDuration * 1000;
+                console.log(`WebSocket消息发送耗时: ${microDuration.toFixed(4)}μs (微秒级精度)`);
+            } else {
+                console.log(`WebSocket消息发送耗时: ${sendDuration.toFixed(2)}ms`);
+            }
+            
             return true;
         } catch (error) {
             console.error('发送WebSocket消息失败:', error);
@@ -171,6 +188,9 @@ class AuctionWebSocketManager {
 
         // 启动心跳
         this._startHeartbeat();
+        
+        // 启动连接健康检查
+        this._startConnectionCheck();
 
         // 通知连接状态变化
         this._notifyConnectionChange(true);
@@ -181,8 +201,48 @@ class AuctionWebSocketManager {
      */
     _onMessage(event) {
         try {
+            // 记录接收开始时间
+            const receiveStartTime = performance.now();
+            
             const message = JSON.parse(event.data);
             console.log('收到WebSocket消息:', message);
+            
+            // 计算并记录接收时间差（仅包含JSON解析时间）
+            const parseDuration = performance.now() - receiveStartTime;
+            
+            // 当毫秒小于1时，使用微秒级精度
+            if (parseDuration < 1) {
+                const microDuration = parseDuration * 1000;
+                console.log(`WebSocket消息解析耗时: ${microDuration.toFixed(4)}μs (微秒级精度)`);
+            } else {
+                console.log(`WebSocket消息解析耗时: ${parseDuration.toFixed(4)}ms`);
+            }
+            
+            // 如果消息包含发送时间，计算网络传输时间差
+            if (message.sendTime) {
+                const sendTime = new Date(message.sendTime);
+                const receiveTime = new Date();
+                const networkDelay = receiveTime - sendTime;
+                
+                // 当毫秒小于1时，使用微秒级精度
+                if (networkDelay < 1) {
+                    const microNetworkDelay = networkDelay * 1000;
+                    console.log(`网络传输时间差: ${microNetworkDelay.toFixed(4)}μs (从服务器发送到客户端接收) - 微秒级精度`);
+                } else {
+                    console.log(`网络传输时间差: ${networkDelay}ms (从服务器发送到客户端接收)`);
+                }
+                
+                // 计算总处理时间（从服务器发送到客户端处理完成）
+                const totalProcessingTime = networkDelay + parseDuration;
+                
+                // 当毫秒小于1时，使用微秒级精度
+                if (totalProcessingTime < 1) {
+                    const microTotalTime = totalProcessingTime * 1000;
+                    console.log(`总处理时间: ${microTotalTime.toFixed(4)}μs (从服务器发送到客户端处理完成) - 微秒级精度`);
+                } else {
+                    console.log(`总处理时间: ${totalProcessingTime.toFixed(4)}ms (从服务器发送到客户端处理完成)`);
+                }
+            }
 
             // 处理心跳响应
             if (message.type === 'pong') {
@@ -222,6 +282,12 @@ class AuctionWebSocketManager {
         if (this.heartbeatTimeout) {
             clearTimeout(this.heartbeatTimeout);
             this.heartbeatTimeout = null;
+        }
+        
+        // 清理连接健康检查
+        if (this.connectionCheckInterval) {
+            clearInterval(this.connectionCheckInterval);
+            this.connectionCheckInterval = null;
         }
 
         // 通知连接状态变化
@@ -327,14 +393,18 @@ class AuctionWebSocketManager {
             clearInterval(this.heartbeatInterval);
         }
 
+        console.log(`启动心跳机制，间隔${this.heartbeatIntervalTime/1000}秒`);
         this.heartbeatInterval = setInterval(() => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                console.log('发送心跳ping');
                 this.send({ type: 'ping' });
                 
                 // 设置心跳超时
                 this.heartbeatTimeout = setTimeout(() => {
-                    console.warn('心跳超时，关闭连接');
-                    this.socket.close();
+                    console.warn('心跳超时，可能连接已断开，主动关闭连接');
+                    if (this.socket) {
+                        this.socket.close(1006, '心跳超时');
+                    }
                 }, this.heartbeatTimeoutTime);
             }
         }, this.heartbeatIntervalTime);
@@ -347,7 +417,32 @@ class AuctionWebSocketManager {
         if (this.heartbeatTimeout) {
             clearTimeout(this.heartbeatTimeout);
             this.heartbeatTimeout = null;
+            console.log('收到服务器pong响应，心跳正常');
         }
+    }
+    
+    /**
+     * 启动连接健康检查
+     */
+    _startConnectionCheck() {
+        if (this.connectionCheckInterval) {
+            clearInterval(this.connectionCheckInterval);
+        }
+        
+        console.log(`启动连接健康检查，间隔${this.connectionCheckIntervalTime/1000}秒`);
+        this.connectionCheckInterval = setInterval(() => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                // 发送一个测试消息来检查连接是否真正可用
+                console.log('执行连接健康检查');
+                this.send({ type: 'connection_check' });
+            } else if (this.socket && this.socket.readyState !== WebSocket.CONNECTING) {
+                // 连接状态异常，尝试重新连接
+                console.warn('连接状态异常，尝试重新连接');
+                this.isConnected = false;
+                this._notifyConnectionChange(false);
+                this._scheduleReconnect();
+            }
+        }, this.connectionCheckIntervalTime);
     }
 
     /**
@@ -474,9 +569,9 @@ class AuctionWebSocketManager {
             this.reconnectAttempts = 0; // 重置重连尝试次数
             this.connect();
         }
-        // 如果页面变为隐藏，暂停心跳但不关闭连接
+        // 如果页面变为隐藏，不暂停心跳，而是降低频率
         else if (!isVisible && this.isConnected) {
-            console.log('页面变为隐藏，暂停心跳');
+            console.log('页面变为隐藏，降低心跳频率');
             if (this.heartbeatInterval) {
                 clearInterval(this.heartbeatInterval);
                 this.heartbeatInterval = null;
@@ -485,10 +580,34 @@ class AuctionWebSocketManager {
                 clearTimeout(this.heartbeatTimeout);
                 this.heartbeatTimeout = null;
             }
+            
+            // 页面隐藏时使用更低频率的心跳
+            this.heartbeatInterval = setInterval(() => {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    console.log('页面隐藏中，发送低频心跳ping');
+                    this.send({ type: 'ping' });
+                    
+                    // 设置心跳超时
+                    this.heartbeatTimeout = setTimeout(() => {
+                        console.warn('页面隐藏中心跳超时，可能连接已断开，主动关闭连接');
+                        if (this.socket) {
+                            this.socket.close(1006, '页面隐藏中心跳超时');
+                        }
+                    }, this.heartbeatTimeoutTime * 2); // 页面隐藏时超时时间加倍
+                }
+            }, this.heartbeatIntervalTime * 2); // 页面隐藏时心跳间隔加倍
         }
-        // 如果页面变为可见且WebSocket已连接，恢复心跳
+        // 如果页面变为可见且WebSocket已连接，恢复正常心跳
         else if (isVisible && this.isConnected) {
-            console.log('页面变为可见，恢复心跳');
+            console.log('页面变为可见，恢复正常心跳频率');
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+                this.heartbeatInterval = null;
+            }
+            if (this.heartbeatTimeout) {
+                clearTimeout(this.heartbeatTimeout);
+                this.heartbeatTimeout = null;
+            }
             this._startHeartbeat();
         }
     }

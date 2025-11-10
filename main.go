@@ -146,7 +146,7 @@ func startAuction(w http.ResponseWriter, r *http.Request) {
 		AuctionID int `json:"auction_id"`
 	}
 	var auctionID int
-	
+
 	// 尝试解析请求体获取拍卖ID
 	body, err := io.ReadAll(r.Body)
 	if err == nil {
@@ -154,10 +154,10 @@ func startAuction(w http.ResponseWriter, r *http.Request) {
 			auctionID = data.AuctionID
 		}
 	}
-	
+
 	// 重置请求体，以便market.StartAuction可以读取
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-	
+
 	// 调用market.StartAuction
 	market.StartAuction(db, w, r)
 
@@ -182,7 +182,7 @@ func CommitAuctionBid(w http.ResponseWriter, r *http.Request) {
 		AuctionID int `json:"auction_id"`
 	}
 	var auctionID int
-	
+
 	// 尝试解析请求体获取拍卖ID
 	body, err := io.ReadAll(r.Body)
 	if err == nil {
@@ -190,10 +190,10 @@ func CommitAuctionBid(w http.ResponseWriter, r *http.Request) {
 			auctionID = data.AuctionID
 		}
 	}
-	
+
 	// 重置请求体，以便market.CommitAuctionBid可以读取
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-	
+
 	// 调用market.CommitAuctionBid
 	market.CommitAuctionBid(db, w, r)
 
@@ -213,7 +213,7 @@ func cancelAuction(w http.ResponseWriter, r *http.Request) {
 		AuctionID int `json:"auction_id"`
 	}
 	var auctionID int
-	
+
 	// 尝试解析请求体获取拍卖ID
 	body, err := io.ReadAll(r.Body)
 	if err == nil {
@@ -221,10 +221,10 @@ func cancelAuction(w http.ResponseWriter, r *http.Request) {
 			auctionID = data.AuctionID
 		}
 	}
-	
+
 	// 重置请求体，以便market.CancelAuction可以读取
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-	
+
 	// 调用market.CancelAuction
 	market.CancelAuction(db, w, r)
 
@@ -244,7 +244,7 @@ func pauseAuction(w http.ResponseWriter, r *http.Request) {
 		AuctionID int `json:"auction_id"`
 	}
 	var auctionID int
-	
+
 	// 尝试解析请求体获取拍卖ID
 	body, err := io.ReadAll(r.Body)
 	if err == nil {
@@ -252,10 +252,10 @@ func pauseAuction(w http.ResponseWriter, r *http.Request) {
 			auctionID = data.AuctionID
 		}
 	}
-	
+
 	// 重置请求体，以便market.PauseAuction可以读取
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-	
+
 	// 调用market.PauseAuction
 	market.PauseAuction(db, w, r)
 
@@ -288,10 +288,10 @@ func main() {
 		fmt.Printf("打开数据库失败: %v", err)
 		return
 	}
-	
+
 	// 设置连接池参数，提高并发性能
-	db.SetMaxOpenConns(25) // 设置最大打开连接数
-	db.SetMaxIdleConns(5)  // 设置最大空闲连接数
+	db.SetMaxOpenConns(25)                 // 设置最大打开连接数
+	db.SetMaxIdleConns(10)                 // 设置最大空闲连接数
 	db.SetConnMaxLifetime(5 * time.Minute) // 设置连接最大生存时间
 
 	// 初始化数据库
