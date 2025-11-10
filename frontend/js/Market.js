@@ -1,5 +1,6 @@
-// 市场页 - 动态供需平衡定价系统前端脚本
-
+/**
+ * 市场页 - 动态供需平衡定价系统前端脚本
+ */
 // 全局变量
 let marketParams = {
     balanceRange: 1,      // 平衡区间系数
@@ -99,17 +100,21 @@ async function loadMarketParams() {
     try {
         const response = await fetch('/api/market/params');
         if (response.ok) {
-            const params = await response.json();
-            marketParams = params;
-            
-            // 更新UI
-            const balanceRangeInput = document.getElementById('balanceRange');
-            const priceFluctuationInput = document.getElementById('priceFluctuation');
-            const maxPriceChangeInput = document.getElementById('maxPriceChange');
-            
-            if (balanceRangeInput) balanceRangeInput.value = marketParams.balanceRange;
-            if (priceFluctuationInput) priceFluctuationInput.value = marketParams.priceFluctuation;
-            if (maxPriceChangeInput) maxPriceChangeInput.value = marketParams.maxPriceChange;
+            const data = await response.json();
+            if (data.success && data.params) {
+                marketParams = data.params;
+                
+                // 更新UI
+                const balanceRangeInput = document.getElementById('balanceRange');
+                const priceFluctuationInput = document.getElementById('priceFluctuation');
+                const maxPriceChangeInput = document.getElementById('maxPriceChange');
+                
+                if (balanceRangeInput) balanceRangeInput.value = marketParams.balanceRange;
+                if (priceFluctuationInput) priceFluctuationInput.value = marketParams.priceFluctuation;
+                if (maxPriceChangeInput) maxPriceChangeInput.value = marketParams.maxPriceChange;
+            } else {
+                console.error('Invalid market params data structure:', data);
+            }
         }
     } catch (error) {
         console.error('Error loading market params:', error);
@@ -160,14 +165,18 @@ async function loadBackpack() {
         const response = await fetch('/api/market/backpack');
         if (response.ok) {
             const data = await response.json();
-            backpack = data;
-            
-            // 更新UI
-            const backpackAppleCount = document.getElementById('backpackAppleCount');
-            const backpackWoodCount = document.getElementById('backpackWoodCount');
-            
-            if (backpackAppleCount) backpackAppleCount.textContent = backpack.apple;
-            if (backpackWoodCount) backpackWoodCount.textContent = backpack.wood;
+            if (data.success && data.backpack) {
+                backpack = data.backpack;
+                
+                // 更新UI
+                const backpackAppleCount = document.getElementById('backpackAppleCount');
+                const backpackWoodCount = document.getElementById('backpackWoodCount');
+                
+                if (backpackAppleCount) backpackAppleCount.textContent = backpack.apple;
+                if (backpackWoodCount) backpackWoodCount.textContent = backpack.wood;
+            } else {
+                console.error('Invalid backpack data structure:', data);
+            }
         }
     } catch (error) {
         console.error('Error loading backpack:', error);
@@ -179,11 +188,19 @@ async function loadMarketItems() {
     try {
         const response = await fetch('/api/market/items');
         if (response.ok) {
-            const items = await response.json();
-            marketItems = items;
-            
-            // 更新UI
-            updateMarketUI();
+            const data = await response.json();
+            if (data.success && data.items) {
+                // 转换后端返回的数据结构为前端期望的格式
+                marketItems = {
+                    apple: data.items.apple,
+                    wood: data.items.wood
+                };
+                
+                // 更新UI
+                updateMarketUI();
+            } else {
+                console.error('Invalid market items data structure:', data);
+            }
         }
     } catch (error) {
         console.error('Error loading market items:', error);
@@ -280,12 +297,19 @@ async function loadBalance() {
     try {
         const response = await fetch('/api/cash/balance');
         if (response.ok) {
-            const balance = await response.json();
+            const data = await response.json();
+            
+            // 检查响应数据结构
+            if (!data.success || !data.balance) {
+                throw new Error('Invalid balance data response');
+            }
+            
+            const balance = data.balance;
             
             // 更新余额显示
             const balanceAmount = document.getElementById('marketBalanceAmount');
             if (balanceAmount) {
-                balanceAmount.textContent = formatCurrency(balance.amount);
+                balanceAmount.textContent = formatCurrency(balance.amount || 0);
             }
             
             // 更新最后更新时间
@@ -310,14 +334,18 @@ async function makeApple() {
         if (response.ok) {
             const result = await response.json();
             
-            // 更新背包
-            backpack.apple = result.backpack.apple;
-            
-            // 更新UI
-            const backpackAppleCount = document.getElementById('backpackAppleCount');
-            if (backpackAppleCount) backpackAppleCount.textContent = backpack.apple;
-            
-            showToast('制作苹果成功', 'success');
+            if (result.success && result.backpack) {
+                // 更新背包
+                backpack = result.backpack;
+                
+                // 更新UI
+                const backpackAppleCount = document.getElementById('backpackAppleCount');
+                if (backpackAppleCount) backpackAppleCount.textContent = backpack.apple;
+                
+                showToast('制作苹果成功', 'success');
+            } else {
+                showToast('制作苹果失败', 'error');
+            }
         } else {
             showToast('制作苹果失败', 'error');
         }
@@ -337,14 +365,18 @@ async function makeWood() {
         if (response.ok) {
             const result = await response.json();
             
-            // 更新背包
-            backpack.wood = result.backpack.wood;
-            
-            // 更新UI
-            const backpackWoodCount = document.getElementById('backpackWoodCount');
-            if (backpackWoodCount) backpackWoodCount.textContent = backpack.wood;
-            
-            showToast('制作木材成功', 'success');
+            if (result.success && result.backpack) {
+                // 更新背包
+                backpack = result.backpack;
+                
+                // 更新UI
+                const backpackWoodCount = document.getElementById('backpackWoodCount');
+                if (backpackWoodCount) backpackWoodCount.textContent = backpack.wood;
+                
+                showToast('制作木材成功', 'success');
+            } else {
+                showToast('制作木材失败', 'error');
+            }
         } else {
             showToast('制作木材失败', 'error');
         }
@@ -356,11 +388,6 @@ async function makeWood() {
 
 // 卖出物品
 async function sellItem(itemType) {
-    if (backpack[itemType] <= 0) {
-        showToast(`背包中没有${itemType === 'apple' ? '苹果' : '木材'}`, 'warning');
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/market/sell-${itemType}`, {
             method: 'POST'
@@ -369,20 +396,32 @@ async function sellItem(itemType) {
         if (response.ok) {
             const result = await response.json();
             
-            // 更新背包
-            backpack = result.backpack;
-            
-            // 更新市场物品
-            marketItems = result.marketItems;
-            
-            // 更新UI
-            updateBackpackUI();
-            updateMarketUI();
-            loadBalance(); // 更新余额
-            
-            showToast(`卖出${itemType === 'apple' ? '苹果' : '木材'}成功`, 'success');
+            if (result.success) {
+                // 更新背包
+                if (result.backpack) {
+                    backpack = result.backpack;
+                }
+                
+                // 更新市场物品 - 转换后端返回的数据结构为前端期望的格式
+                if (result.marketItems) {
+                    marketItems = {
+                        apple: result.marketItems.apple,
+                        wood: result.marketItems.wood
+                    };
+                }
+                
+                // 更新UI
+                updateBackpackUI();
+                updateMarketUI();
+                loadBalance(); // 更新余额
+                
+                showToast(`卖出${itemType === 'apple' ? '苹果' : '木材'}成功`, 'success');
+            } else {
+                showToast(result.message || `卖出${itemType === 'apple' ? '苹果' : '木材'}失败`, 'error');
+            }
         } else {
-            showToast(`卖出${itemType === 'apple' ? '苹果' : '木材'}失败`, 'error');
+            const error = await response.json();
+            showToast(error.message || `卖出${itemType === 'apple' ? '苹果' : '木材'}失败`, 'error');
         }
     } catch (error) {
         console.error(`Error selling ${itemType}:`, error);
@@ -400,18 +439,29 @@ async function buyItem(itemType) {
         if (response.ok) {
             const result = await response.json();
             
-            // 更新背包
-            backpack = result.backpack;
-            
-            // 更新市场物品
-            marketItems = result.marketItems;
-            
-            // 更新UI
-            updateBackpackUI();
-            updateMarketUI();
-            loadBalance(); // 更新余额
-            
-            showToast(`买入${itemType === 'apple' ? '苹果' : '木材'}成功`, 'success');
+            if (result.success) {
+                // 更新背包
+                if (result.backpack) {
+                    backpack = result.backpack;
+                }
+                
+                // 更新市场物品 - 转换后端返回的数据结构为前端期望的格式
+                if (result.marketItems) {
+                    marketItems = {
+                        apple: result.marketItems.apple,
+                        wood: result.marketItems.wood
+                    };
+                }
+                
+                // 更新UI
+                updateBackpackUI();
+                updateMarketUI();
+                loadBalance(); // 更新余额
+                
+                showToast(`买入${itemType === 'apple' ? '苹果' : '木材'}成功`, 'success');
+            } else {
+                showToast(result.message || `买入${itemType === 'apple' ? '苹果' : '木材'}失败`, 'error');
+            }
         } else {
             const error = await response.json();
             showToast(error.message || `买入${itemType === 'apple' ? '苹果' : '木材'}失败`, 'error');

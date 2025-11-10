@@ -168,17 +168,26 @@ func InitMarketDatabase(db *sql.DB) error {
 
 // 获取市场参数
 func GetMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	var params MarketParams
 	err := db.QueryRow("SELECT id, balance_range, price_fluctuation, max_price_change, created_at, updated_at FROM market_params ORDER BY id DESC LIMIT 1").Scan(
 		&params.ID, &params.BalanceRange, &params.PriceFluctuation, &params.MaxPriceChange, &params.CreatedAt, &params.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取市场参数失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取市场参数失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(params)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"params":  params,
+	})
 }
 
 // 更新市场参数
@@ -194,8 +203,14 @@ func UpdateMarketParams(db *sql.DB, params MarketParams) error {
 
 // 保存市场参数
 func SaveMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != "POST" {
-		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
 		return
 	}
 
@@ -204,7 +219,12 @@ func SaveMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	var params MarketParams
 	err := json.NewDecoder(r.Body).Decode(&params)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "解析请求数据失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -212,7 +232,12 @@ func SaveMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	var currentID int
 	err = db.QueryRow("SELECT id FROM market_params ORDER BY id DESC LIMIT 1").Scan(&currentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取当前参数ID失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -221,29 +246,46 @@ func SaveMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 更新市场参数
 	err = UpdateMarketParams(db, params)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新市场参数失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	logger.Info("market", fmt.Sprintf("成功更新市场参数: 平衡区间=%.2f, 价格波动=%.2f, 最大价格变动=%.2f\n", params.BalanceRange, params.PriceFluctuation, params.MaxPriceChange))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(params)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "市场参数更新成功",
+		"params":  params,
+	})
 }
 
 // 获取背包状态
 func GetBackpack(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	var backpack Backpack
 	err := db.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取背包状态失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取背包状态失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(backpack)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"backpack": backpack,
+	})
 }
 
 // 更新背包
@@ -259,13 +301,20 @@ func UpdateBackpack(db *sql.DB, backpack Backpack) error {
 
 // 获取市场物品
 func GetMarketItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	// 获取苹果
 	var apple MarketItem
 	err := db.QueryRow("SELECT id, name, price, stock, base_price, created_at, updated_at FROM market_items WHERE name = 'apple'").Scan(
 		&apple.ID, &apple.Name, &apple.Price, &apple.Stock, &apple.BasePrice, &apple.CreatedAt, &apple.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取苹果物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取苹果物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -275,7 +324,12 @@ func GetMarketItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		&wood.ID, &wood.Name, &wood.Price, &wood.Stock, &wood.BasePrice, &wood.CreatedAt, &wood.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取木材物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取木材物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -284,8 +338,10 @@ func GetMarketItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		Wood:  wood,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"items":   items,
+	})
 }
 
 // 更新市场物品价格和库存
@@ -344,9 +400,15 @@ func CalculateNewPrice(currentPrice float64, stock int, params MarketParams, bas
 
 // 制作物品
 func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("制作物品请求失败，不支持的请求方法: %s\n", r.Method))
-		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
 		return
 	}
 
@@ -358,7 +420,12 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取背包状态失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取背包状态失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -370,7 +437,11 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		backpack.Wood++
 	default:
 		logger.Info("market", fmt.Sprintf("制作物品失败，无效的物品类型: %s\n", itemType))
-		http.Error(w, "无效的物品类型", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "无效的物品类型",
+		})
 		return
 	}
 
@@ -378,7 +449,12 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	tx, err := db.Begin()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("开始事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "开始事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -388,7 +464,12 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新背包失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -408,7 +489,12 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "添加交易记录失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -416,24 +502,35 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	err = tx.Commit()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("提交事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "提交事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	logger.Info("market", fmt.Sprintf("成功制作物品: %s\n", itemType))
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
+		"message":  "物品制作成功",
 		"backpack": backpack,
 	})
 }
 
 // 卖出物品
 func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("卖出物品请求失败，不支持的请求方法: %s\n", r.Method))
-		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
 		return
 	}
 
@@ -445,18 +542,31 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取背包状态失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取背包状态失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	// 检查背包中是否有足够的物品
 	if itemType == "apple" && backpack.Apple <= 0 {
 		logger.Info("market", "卖出物品失败，背包中没有苹果\n")
-		http.Error(w, "背包中没有苹果", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "卖出物品失败，背包中没有苹果",
+		})
 		return
 	} else if itemType == "wood" && backpack.Wood <= 0 {
 		logger.Info("market", "卖出物品失败，背包中没有木材\n")
-		http.Error(w, "背包中没有木材", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "卖出物品失败，背包中没有木材",
+		})
 		return
 	}
 
@@ -471,13 +581,22 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 	default:
 		logger.Info("market", fmt.Sprintf("卖出物品失败，无效的物品类型: %s\n", itemType))
-		http.Error(w, "无效的物品类型", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "卖出物品失败，无效的物品类型",
+		})
 		return
 	}
 
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取市场物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取市场物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -490,7 +609,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	err = db.QueryRow("SELECT id, amount, updated_at FROM balance ORDER BY id DESC LIMIT 1").Scan(&balance.ID, &balance.Amount, &balance.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取账户余额失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取账户余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -500,7 +624,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		&params.ID, &params.BalanceRange, &params.PriceFluctuation, &params.MaxPriceChange, &params.CreatedAt, &params.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取市场参数失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取市场参数失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -512,7 +641,11 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		backpack.Wood--
 	default:
 		logger.Info("market", fmt.Sprintf("卖出物品失败，无效的物品类型: %s\n", itemType))
-		http.Error(w, "无效的物品类型", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "卖出物品失败，无效的物品类型",
+		})
 		return
 	}
 
@@ -529,7 +662,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	tx, err := db.Begin()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("开始事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "开始事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -539,7 +677,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新背包失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -549,7 +692,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场物品失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新市场物品失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -559,7 +707,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新余额失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -571,7 +724,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "添加交易记录失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -579,7 +737,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	err = tx.Commit()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("提交事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "提交事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -591,7 +754,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		&apple.ID, &apple.Name, &apple.Price, &apple.Stock, &apple.BasePrice, &apple.CreatedAt, &apple.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取苹果物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取苹果物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -600,7 +768,12 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		&wood.ID, &wood.Name, &wood.Price, &wood.Stock, &wood.BasePrice, &wood.CreatedAt, &wood.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取木材物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取木材物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -609,9 +782,9 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 		Wood:  wood,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":     true,
+		"message":     "物品卖出成功",
 		"backpack":    backpack,
 		"marketItems": items,
 	})
@@ -619,9 +792,15 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 
 // 买入物品
 func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("买入物品请求失败，不支持的请求方法: %s\n", r.Method))
-		http.Error(w, "不支持的请求方法", http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
 		return
 	}
 
@@ -635,7 +814,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("获取苹果物品信息失败: %v\n", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "获取苹果物品信息失败",
+				"error":   err.Error(),
+			})
 			return
 		}
 	case "wood":
@@ -643,19 +827,32 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("获取木材物品信息失败: %v\n", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "获取木材物品信息失败",
+				"error":   err.Error(),
+			})
 			return
 		}
 	default:
 		logger.Info("market", fmt.Sprintf("买入物品失败，无效的物品类型: %s\n", itemType))
-		http.Error(w, "无效的物品类型", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "无效的物品类型",
+		})
 		return
 	}
 
 	// 检查市场物品库存
 	if item.Stock <= 0 {
 		logger.Info("market", fmt.Sprintf("买入物品失败，市场库存不足: %s\n", itemType))
-		http.Error(w, fmt.Sprintf("No %s in stock", itemType), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("库存中没有%s", itemType),
+		})
 		return
 	}
 
@@ -668,14 +865,23 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	err := db.QueryRow("SELECT id, amount, updated_at FROM balance ORDER BY id DESC LIMIT 1").Scan(&balance.ID, &balance.Amount, &balance.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取账户余额失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取账户余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
 	// 检查余额是否足够
 	if balance.Amount < item.Price {
 		logger.Info("market", fmt.Sprintf("买入物品失败，余额不足，需要: %.2f，当前余额: %.2f\n", item.Price, balance.Amount))
-		http.Error(w, "余额不足", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "余额不足",
+		})
 		return
 	}
 
@@ -685,7 +891,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取背包状态失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取背包状态失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -695,7 +906,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		&params.ID, &params.BalanceRange, &params.PriceFluctuation, &params.MaxPriceChange, &params.CreatedAt, &params.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取市场参数失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取市场参数失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -707,7 +923,11 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		backpack.Wood++
 	default:
 		logger.Info("market", fmt.Sprintf("买入物品失败，无效的物品类型: %s\n", itemType))
-		http.Error(w, "无效的物品类型", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "无效的物品类型",
+		})
 		return
 	}
 
@@ -724,7 +944,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	tx, err := db.Begin()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("开始事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "开始事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -734,7 +959,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新背包失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -744,7 +974,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场物品失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新市场物品失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -754,7 +989,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新余额失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新余额失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -766,7 +1006,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "添加交易记录失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -774,7 +1019,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	err = tx.Commit()
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("提交事务失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "提交事务失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -786,7 +1036,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		&apple.ID, &apple.Name, &apple.Price, &apple.Stock, &apple.BasePrice, &apple.CreatedAt, &apple.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取苹果物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取苹果物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -795,7 +1050,12 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		&wood.ID, &wood.Name, &wood.Price, &wood.Stock, &wood.BasePrice, &wood.CreatedAt, &wood.UpdatedAt)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("获取木材物品信息失败: %v\n", err))
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "获取木材物品信息失败",
+			"error":   err.Error(),
+		})
 		return
 	}
 
@@ -804,9 +1064,9 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		Wood:  wood,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":     true,
+		"message":     "物品买入成功",
 		"backpack":    backpack,
 		"marketItems": items,
 	})

@@ -2,7 +2,7 @@
  * 荷兰钟可视化类
  * 基于二维笛卡尔坐标系实现荷兰钟动画效果
  */
-class DutchClockVisualizer {
+class AuctionClockVisualizer {
     constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
         if (!this.canvas) {
@@ -34,6 +34,9 @@ class DutchClockVisualizer {
         // Canvas刷新控制
         this.canvasRefreshInterval = null;
         this.lastUpdateTime = 0;
+        
+        // 指针动画控制
+        this.handAnimationTimer = null;
         
         // 价格刻度
         this.priceTicks = [];
@@ -76,50 +79,23 @@ class DutchClockVisualizer {
     
     /**
      * 根据价格更新角度
+     * 注意：这里根据后端WebSocket发送的价格来更新角度
      */
     updateAngleFromPrice() {
         if (this.maxPrice <= this.minPrice) {
+            this.currentAngle = 0;
             this.targetAngle = 0;
             return;
         }
         
-        // 计算价格范围
+        // 计算价格比例
         const priceRange = this.maxPrice - this.minPrice;
-        const currentPriceOffset = this.currentPrice - this.minPrice;
+        const priceRatio = (this.maxPrice - this.currentPrice) / priceRange;
         
-        // 计算角度比例（逆时针方向，从初始价格到最低价格）
-        // 保留一个刻度的间隔，避免最低价格与初始价格重叠
-        const angleRatio = currentPriceOffset / priceRange;
-        
-        // 转换为弧度（逆时针方向，从0度开始）
-        // 从初始价格开始，逆时针向最低价格递减
-        // 保留一个刻度的间隔，所以实际使用范围是 0 到 360-18 度（18度约为一个刻度的间隔）
-        this.targetAngle = Math.PI * 2 * (1 - angleRatio) * (0.95); // 0.95 确保保留5%的间隔
-    }
-    
-    /**
-     * 根据角度更新价格
-     */
-    updatePriceFromAngle() {
-        if (this.maxPrice <= this.minPrice) {
-            this.currentPrice = this.minPrice;
-            return;
-        }
-        
-        // 计算角度比例（逆时针方向，从初始价格到最低价格）
-        // 考虑保留的间隔，所以需要除以0.95
-        const angleRatio = (this.currentAngle / (Math.PI * 2)) / 0.95;
-        
-        // 计算价格
-        const priceRange = this.maxPrice - this.minPrice;
-        // 从初始价格开始，逆时针向最低价格递减
-        this.currentPrice = this.maxPrice - (priceRange * angleRatio);
-        
-        // 确保价格不低于最低价格
-        this.currentPrice = Math.max(this.minPrice, this.currentPrice);
-        
-        // 更新显示
-        this.updatePriceDisplay();
+        // 计算角度（逆时针方向，从初始价格到最低价格）
+        // 考虑保留的间隔，所以需要乘以0.95
+        this.currentAngle = priceRatio * Math.PI * 2 * 0.95;
+        this.targetAngle = this.currentAngle;
     }
     
     /**
@@ -177,61 +153,55 @@ class DutchClockVisualizer {
      * 启动每秒刷新canvas的计时器
      */
     startCanvasRefresh() {
-        // 使用统一定时器管理系统
-        if (window.timerManager) {
-            // 清除可能存在的旧可视化器定时器
-            window.timerManager.stopVisualTimer('canvas-refresh');
-            
-            // 设置每秒刷新一次canvas
-            window.timerManager.startVisualTimer('canvas-refresh', () => {
-                this.lastUpdateTime = Date.now();
-                this.drawClock();
-            }, 1000);
-        } else {
-            // 回退到原始方法
-            if (this.canvasRefreshInterval) {
-                clearInterval(this.canvasRefreshInterval);
-            }
-            
-            this.canvasRefreshInterval = setInterval(() => {
-                this.lastUpdateTime = Date.now();
-                this.drawClock();
-            }, 1000);
+        // 停止之前的画布刷新定时器
+        if (this.canvasRefreshInterval) {
+            clearInterval(this.canvasRefreshInterval);
         }
+        
+        // 启动新的画布刷新定时器
+        this.canvasRefreshInterval = setInterval(() => {
+            this.lastUpdateTime = Date.now();
+            this.drawClock();
+        }, 1000); // 每秒刷新一次画布
     }
     
     /**
-     * 启动指针动画计时器
-     * 根据递减间隔更新指针位置
+     * 启动指针动画
      */
     startHandAnimation() {
-        // 清除可能存在的旧计时器
-        if (this.handAnimationInterval) {
-            clearInterval(this.handAnimationInterval);
+        // 停止之前的指针动画
+        if (this.handAnimationTimer) {
+            clearInterval(this.handAnimationTimer);
         }
         
-        // 根据递减间隔设置指针更新频率
-        const interval = (this.decrementInterval || 1) * 1000; // 转换为毫秒
-        
-        // 确保指针从当前价格对应的角度开始
-        this.updateAngleFromPrice();
-        
-        this.handAnimationInterval = setInterval(() => {
-            // 计算新的目标角度（根据递减价格）
-            // 逆时针方向，角度增加
-            const priceDecrementAngle = (this.priceDecrement / (this.maxPrice - this.minPrice)) * Math.PI * 2 * 0.95;
-            this.targetAngle += priceDecrementAngle;
-            
-            // 确保不超过最大角度（考虑保留的间隔）
-            const maxAngle = Math.PI * 2 * 0.95;
-            if (this.targetAngle >= maxAngle) {
-                this.targetAngle = maxAngle;
-                clearInterval(this.handAnimationInterval);
+        // 启动新的指针动画
+        this.handAnimationTimer = setInterval(() => {
+            // 更新角度
+            if (this.isAnimating && this.auction) {
+                // 计算时间差
+                const now = Date.now();
+                const timeDiff = now - this.lastUpdateTime;
+                
+                // 根据时间差计算应该增加的角度
+                const angleIncrement = (timeDiff / 1000) * (Math.PI * 2 * 0.95) / (this.decrementInterval * 60);
+                this.currentAngle += angleIncrement;
+                
+                // 限制最大角度
+                const maxAngle = Math.PI * 2 * 0.95;
+                if (this.currentAngle > maxAngle) {
+                    this.currentAngle = maxAngle;
+                }
+                
+                // 更新价格
+                this.updatePriceFromAngle();
+                
+                // 更新最后更新时间
+                this.lastUpdateTime = now;
             }
             
-            // 更新当前价格
-            this.updatePriceFromAngle();
-        }, interval);
+            // 绘制钟表
+            this.drawClock();
+        }, 50); // 每50ms更新一次指针位置
     }
     
     /**
@@ -246,11 +216,6 @@ class DutchClockVisualizer {
             this.animationFrame = null;
         }
         
-        // 使用统一定时器管理系统清除可视化器定时器
-        if (window.timerManager) {
-            window.timerManager.stopVisualTimer('canvas-refresh');
-        }
-        
         // 清除canvas刷新计时器（回退方法）
         if (this.canvasRefreshInterval) {
             clearInterval(this.canvasRefreshInterval);
@@ -258,10 +223,57 @@ class DutchClockVisualizer {
         }
         
         // 清除指针动画计时器
-        if (this.handAnimationInterval) {
-            clearInterval(this.handAnimationInterval);
-            this.handAnimationInterval = null;
+        if (this.handAnimationTimer) {
+            clearInterval(this.handAnimationTimer);
+            this.handAnimationTimer = null;
         }
+    }
+    
+    /**
+     * 暂停动画
+     * 保留当前状态，但停止动画更新
+     */
+    pauseAnimation() {
+        // 标记动画为暂停状态
+        this.isAnimating = false;
+        
+        // 清除动画帧
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+        
+        // 清除指针动画计时器，但保留当前角度和价格
+        if (this.handAnimationTimer) {
+            clearInterval(this.handAnimationTimer);
+            this.handAnimationTimer = null;
+        }
+        
+        // 清除canvas刷新计时器（回退方法）
+        if (this.canvasRefreshInterval) {
+            clearInterval(this.canvasRefreshInterval);
+            this.canvasRefreshInterval = null;
+        }
+    }
+    
+    /**
+     * 恢复动画
+     * 从暂停状态继续播放动画
+     */
+    resumeAnimation() {
+        if (this.isAnimating || !this.auction) return;
+        
+        // 恢复动画状态
+        this.isAnimating = true;
+        
+        // 重新启动每秒刷新canvas的计时器
+        this.startCanvasRefresh();
+        
+        // 重新启动指针动画计时器
+        this.startHandAnimation();
+        
+        // 重新启动平滑动画
+        this.animate();
     }
     
     /**
@@ -347,7 +359,7 @@ class DutchClockVisualizer {
             // 绘制价格标签
             this.ctx.save();
             this.ctx.fillStyle = '#374151';
-            this.ctx.font = '12px Arial';
+            this.ctx.font = '9px Arial';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             
@@ -376,8 +388,14 @@ class DutchClockVisualizer {
         this.ctx.lineWidth = 3;
         this.ctx.stroke();
         
-        // 绘制指针圆点
-        this.drawCircle(x, y, 5, '#ef4444', 0);
+        // 绘制当前价格位置的实心圆点
+        const priceX = this.centerX + Math.cos(Math.PI * 1.5 + this.currentAngle) * (this.radius - 10);
+        const priceY = this.centerY + Math.sin(Math.PI * 1.5 + this.currentAngle) * (this.radius - 10);
+        
+        this.ctx.beginPath();
+        this.ctx.arc(priceX, priceY, 2, 0, 2 * Math.PI, false);
+        this.ctx.fillStyle = '#ef4444';
+        this.ctx.fill();
     }
     
     /**
@@ -387,7 +405,7 @@ class DutchClockVisualizer {
         // 0度标记（顶部）
         this.ctx.save();
         this.ctx.fillStyle = '#10b981';
-        this.ctx.font = 'bold 14px Arial';
+        this.ctx.font = 'bold 9px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         this.ctx.fillText('0°', this.centerX, this.centerY - this.radius + 40);
@@ -396,7 +414,7 @@ class DutchClockVisualizer {
         // 90度标记（右侧）
         this.ctx.save();
         this.ctx.fillStyle = '#3b82f6';
-        this.ctx.font = 'bold 14px Arial';
+        this.ctx.font = 'bold 9px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         this.ctx.fillText('90°', this.centerX + this.radius - 40, this.centerY);
@@ -405,7 +423,7 @@ class DutchClockVisualizer {
         // 180度标记（底部）
         this.ctx.save();
         this.ctx.fillStyle = '#f59e0b';
-        this.ctx.font = 'bold 14px Arial';
+        this.ctx.font = 'bold 9px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         this.ctx.fillText('180°', this.centerX, this.centerY + this.radius - 40);
@@ -414,7 +432,7 @@ class DutchClockVisualizer {
         // 270度标记（左侧）
         this.ctx.save();
         this.ctx.fillStyle = '#8b5cf6';
-        this.ctx.font = 'bold 14px Arial';
+        this.ctx.font = 'bold 9px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         this.ctx.fillText('270°', this.centerX - this.radius + 40, this.centerY);
@@ -422,23 +440,64 @@ class DutchClockVisualizer {
     }
     
     /**
+     * 根据角度更新价格
+     * 根据当前角度计算对应的价格
+     */
+    updatePriceFromAngle() {
+        if (this.maxPrice <= this.minPrice) {
+            this.currentPrice = this.maxPrice;
+            return;
+        }
+        
+        // 计算角度比例（考虑保留的间隔0.95）
+        const maxAngle = Math.PI * 2 * 0.95;
+        const angleRatio = this.currentAngle / maxAngle;
+        
+        // 根据角度比例计算价格
+        const priceRange = this.maxPrice - this.minPrice;
+        this.currentPrice = this.maxPrice - (priceRange * angleRatio);
+        
+        // 确保价格不低于最低价格
+        if (this.currentPrice < this.minPrice) {
+            this.currentPrice = this.minPrice;
+        }
+        
+        // 更新UI中的价格显示
+        this.updatePriceDisplay();
+    }
+    
+    /**
      * 更新价格显示
+     * 更新UI中的价格显示元素
      */
     updatePriceDisplay() {
-        const priceElement = document.getElementById('currentPrice');
+        // 查找价格显示元素
+        const priceElement = document.getElementById('current-price');
         if (priceElement) {
             priceElement.textContent = this.formatPrice(this.currentPrice);
         }
+        
+        // 触发自定义事件，通知价格更新
+        const priceUpdateEvent = new CustomEvent('priceUpdate', {
+            detail: {
+                price: this.currentPrice,
+                auctionId: this.auction ? this.auction.id : null
+            }
+        });
+        document.dispatchEvent(priceUpdateEvent);
     }
     
     /**
      * 更新价格
+     * 注意：这里直接使用后端WebSocket发送的价格，而不是本地计算
      * @param {number} newPrice - 新价格
      */
     updatePrice(newPrice) {
-        this.currentPrice = Math.max(this.minPrice, Math.min(this.maxPrice, newPrice));
+        // 直接使用后端WebSocket发送的价格
+        this.currentPrice = newPrice;
+        
+        // 根据新价格更新角度
         this.updateAngleFromPrice();
-        this.updatePriceDisplay();
     }
     
     /**
@@ -461,18 +520,5 @@ class DutchClockVisualizer {
         
         // 重新绘制钟表
         this.drawClock();
-    }
-    
-    /**
-     * 更新剩余时间显示
-     * @param {number} remainingSeconds - 剩余秒数
-     */
-    updateRemainingTime(remainingSeconds) {
-        const timeElement = document.getElementById('remainingTime');
-        if (timeElement) {
-            const minutes = Math.floor(remainingSeconds / 60);
-            const seconds = remainingSeconds % 60;
-            timeElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
     }
 }

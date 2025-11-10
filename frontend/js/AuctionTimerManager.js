@@ -2,29 +2,21 @@
  * 统一定时器管理系统
  * 用于管理荷兰式拍卖系统中的所有定时器，避免定时器泄漏和重复创建
  */
-class DutchTimerManager {
+class AuctionTimerManager {
     constructor() {
         // 存储所有定时器ID的映射
         this.timers = {
             // 卖家区域定时器
             sellerPriceDecrementTimers: {}, // 卖家区域价格递减定时器
-            sellerVisualTimers: {}, // 卖家区域可视化定时器
             
             // 买家区域定时器
-            buyerPriceDecrementTimers: {}, // 买家区域价格递减定时器
-            buyerVisualTimers: {}, // 买家区域可视化定时器
-            
-            // 通用定时器
-            visualTimers: {} // 可视化器定时器
+            buyerPriceDecrementTimers: {} // 买家区域价格递减定时器
         };
         
         // 定时器类型常量
         this.TIMER_TYPES = {
             SELLER_PRICE_DECREMENT: 'sellerPriceDecrementTimers',
-            BUYER_PRICE_DECREMENT: 'buyerPriceDecrementTimers',
-            VISUAL: 'visualTimers',
-            SELLER_VISUAL: 'sellerVisualTimers',
-            BUYER_VISUAL: 'buyerVisualTimers'
+            BUYER_PRICE_DECREMENT: 'buyerPriceDecrementTimers'
         };
     }
     
@@ -63,7 +55,6 @@ class DutchTimerManager {
      */
     stopAllSellerTimers() {
         this.stopAllTimersByType(this.TIMER_TYPES.SELLER_PRICE_DECREMENT);
-        this.stopAllTimersByType(this.TIMER_TYPES.SELLER_VISUAL);
     }
     
     /**
@@ -71,14 +62,6 @@ class DutchTimerManager {
      */
     stopAllBuyerTimers() {
         this.stopAllTimersByType(this.TIMER_TYPES.BUYER_PRICE_DECREMENT);
-        this.stopAllTimersByType(this.TIMER_TYPES.BUYER_VISUAL);
-    }
-    
-    /**
-     * 停止所有可视化定时器
-     */
-    stopAllVisualTimers() {
-        this.stopAllTimersByType(this.TIMER_TYPES.VISUAL);
     }
     
     /**
@@ -140,60 +123,6 @@ class DutchTimerManager {
     }
     
     /**
-     * 启动可视化器定时器
-     * @param {string} id - 定时器ID
-     * @param {Function} callback - 回调函数
-     * @param {number} interval - 间隔时间（毫秒）
-     */
-    startVisualTimer(id, callback, interval) {
-        return this.startTimer(this.TIMER_TYPES.VISUAL, id, callback, interval);
-    }
-    
-    /**
-     * 停止可视化器定时器
-     * @param {string} id - 定时器ID
-     */
-    stopVisualTimer(id) {
-        this.stopTimer(this.TIMER_TYPES.VISUAL, id);
-    }
-    
-    /**
-     * 启动卖家区域可视化定时器
-     * @param {string} id - 定时器ID
-     * @param {Function} callback - 回调函数
-     * @param {number} interval - 间隔时间（毫秒）
-     */
-    startSellerVisualTimer(id, callback, interval) {
-        return this.startTimer(this.TIMER_TYPES.SELLER_VISUAL, id, callback, interval);
-    }
-    
-    /**
-     * 停止卖家区域可视化定时器
-     * @param {string} id - 定时器ID
-     */
-    stopSellerVisualTimer(id) {
-        this.stopTimer(this.TIMER_TYPES.SELLER_VISUAL, id);
-    }
-    
-    /**
-     * 启动买家区域可视化定时器
-     * @param {string} id - 定时器ID
-     * @param {Function} callback - 回调函数
-     * @param {number} interval - 间隔时间（毫秒）
-     */
-    startBuyerVisualTimer(id, callback, interval) {
-        return this.startTimer(this.TIMER_TYPES.BUYER_VISUAL, id, callback, interval);
-    }
-    
-    /**
-     * 停止买家区域可视化定时器
-     * @param {string} id - 定时器ID
-     */
-    stopBuyerVisualTimer(id) {
-        this.stopTimer(this.TIMER_TYPES.BUYER_VISUAL, id);
-    }
-    
-    /**
      * 获取指定类型的定时器数量
      * @param {string} type - 定时器类型
      * @returns {number} 定时器数量
@@ -244,9 +173,9 @@ class DutchTimerManager {
 }
 
 // 创建全局定时器管理器实例
-window.timerManager = new DutchTimerManager();
+window.timerManager = new AuctionTimerManager();
 
-// 导出DutchTimerManager类（如果使用模块系统）
+// 导出AuctionTimerManager类（如果使用模块系统）
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = DutchTimerManager;
+    module.exports = AuctionTimerManager;
 }

@@ -1,5 +1,6 @@
-// 现金余额跟踪系统前端脚本
-
+/**
+ * 首页 - 现金余额跟踪系统前端脚本
+ */
 // 当交易时间改变时，自动更新季度
 document.addEventListener('DOMContentLoaded', function() {
     const transactionTimeInput = document.getElementById('transaction_time');
@@ -71,12 +72,19 @@ async function loadBalance() {
             throw new Error('Failed to load balance');
         }
         
-        const balance = await response.json();
+        const data = await response.json();
+        
+        // 检查响应数据结构
+        if (!data.success || !data.balance) {
+            throw new Error('Invalid balance data response');
+        }
+        
+        const balance = data.balance;
         
         // 更新余额显示
         const balanceAmount = document.getElementById('balanceAmount');
         if (balanceAmount) {
-            balanceAmount.textContent = formatCurrency(balance.amount);
+            balanceAmount.textContent = formatCurrency(balance.amount || 0);
         }
         
         // 更新最后更新时间
@@ -99,7 +107,8 @@ async function loadTransactions() {
             throw new Error('Failed to load transactions');
         }
         
-        const transactions = await response.json();
+        const responseData = await response.json();
+        const transactions = responseData.transactions || [];
         
         // 更新交易记录列表
         const transactionsContainer = document.getElementById('transactionsContainer');

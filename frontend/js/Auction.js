@@ -1,11 +1,264 @@
+/**
+ * 拍卖页 - 荷兰钟拍卖系统前端脚本
+ */
 document.addEventListener('DOMContentLoaded', () => {
     // 初始化页面
     loadBalance();
     loadAuctions();
     loadSellerAuctions();
 
+    // 设置WebSocket消息处理器
+    function setupWebSocketHandlers() {
+        // 检查WebSocket管理器是否可用
+        if (!window.wsManager) {
+            console.error('WebSocket管理器未找到');
+            return;
+        }
+
+        // 注册拍卖更新消息处理器
+        window.wsManager.onMessage('auction_update', (data) => {
+            console.log('收到拍卖更新:', data);
+            handleAuctionUpdate(data);
+        });
+
+        // 注册价格更新消息处理器
+        window.wsManager.onMessage('auction_price_update', (data) => {
+            console.log('收到价格更新:', data);
+            handleAuctionPriceUpdate(data);
+        });
+
+        // 注册拍卖状态更新消息处理器
+        window.wsManager.onMessage('auction_status', (data) => {
+            console.log('收到拍卖状态更新:', data);
+            handleAuctionStatusUpdate(data);
+        });
+
+        // 注册连接状态变化处理器
+        window.wsManager.onConnectionChange((isConnected) => {
+            console.log(`WebSocket连接状态: ${isConnected ? '已连接' : '已断开'}`);
+
+            // 连接恢复时重新加载数据
+            if (isConnected) {
+                loadAuctions();
+                loadSellerAuctions();
+                loadBalance();
+            }
+        });
+    }
+
+    // 处理拍卖更新
+    function handleAuctionUpdate(data) {
+        if (!data || !data.auction) return;
+
+        const auction = data.auction;
+
+        // 更新买家区域的拍卖卡片
+        updateAuctionCard(auction, 'buyer');
+
+        // 更新卖家区域的拍卖卡片
+        updateAuctionCard(auction, 'seller');
+
+        // 显示通知
+        if (data.action === 'started') {
+            showNotification(`拍卖 #${auction.id} 已开始`);
+        } else if (data.action === 'cancelled') {
+            showNotification(`拍卖 #${auction.id} 已取消`);
+
+            // 清除相关定时器
+            window.timerManager.stopBuyerPriceDecrementTimer(auction.id);
+            window.timerManager.stopSellerPriceDecrementTimer(auction.id);
+        } else if (data.action === 'paused') {
+            showNotification(`拍卖 #${auction.id} 已暂停`);
+        } else if (data.action === 'ended') {
+            showNotification(`拍卖 #${auction.id} 已结束`);
+
+            // 清除相关定时器
+            window.timerManager.stopBuyerPriceDecrementTimer(auction.id);
+            window.timerManager.stopSellerPriceDecrementTimer(auction.id);
+        }
+    }
+
+    // 处理价格更新
+    function handleAuctionPriceUpdate(data) {
+        if (!data) return;
+
+        const auctionId = data.auctionId;
+        const oldPrice = data.oldPrice;
+        const newPrice = data.newPrice;
+        const timeRemaining = data.timeRemaining;
+
+        console.log(`收到价格更新: 拍卖ID ${auctionId}, 价格 ${oldPrice} -> ${newPrice}, 剩余时间 ${timeRemaining}秒`);
+
+        // 获取拍卖数据用于验证
+        fetch('/api/auction/get', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                auction_id: parseInt(auctionId)
+            })
+        })
+            .then(response => response.json())
+            .then(result => {
+                if (result.auction) {
+                    const auction = result.auction;
+
+                    // 验证价格是否合理
+                    if (!validateAuctionPrice(auction, newPrice)) {
+                        console.error(`价格验证失败，拒绝更新价格: 拍卖ID ${auctionId}, 价格 ${newPrice}`);
+                        return;
+                    }
+
+                    // 验证剩余时间是否合理
+                    if (!validateAuctionTimeRemaining(auction, timeRemaining)) {
+                        console.error(`时间验证失败，拒绝更新时间: 拍卖ID ${auctionId}, 时间 ${timeRemaining}`);
+                        return;
+                    }
+
+                    // 验证通过，更新价格显示
+                    updateAuctionPrice(auctionId, 'buyer', newPrice);
+                    updateAuctionPrice(auctionId, 'seller', newPrice);
+
+                    // 更新拍卖卡片内的可视化器
+                    if (window.auctionVisualizers && window.auctionVisualizers[auctionId]) {
+                        try {
+                            const visualizer = window.auctionVisualizers[auctionId];
+                            visualizer.updatePrice(newPrice);
+                            visualizer.updateRemainingTime(timeRemaining);
+                        } catch (error) {
+                            console.error(`更新拍卖 ${auctionId} 的可视化器价格失败:`, error);
+                        }
+                    }
+
+                    // 如果价格已达到最低价，停止相关定时器
+                    // 注意：这里不直接结束拍卖，因为后端会发送拍卖状态更新消息
+                    if (timeRemaining <= 0) {
+                        window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
+                        window.timerManager.stopSellerPriceDecrementTimer(auctionId);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('获取拍卖数据失败:', error);
+                // 如果获取数据失败，仍然更新价格显示，但记录警告
+                console.warn('无法验证价格，但仍更新显示');
+                updateAuctionPrice(auctionId, 'buyer', newPrice);
+                updateAuctionPrice(auctionId, 'seller', newPrice);
+            });
+    }
+
+    // 处理拍卖状态更新
+    function handleAuctionStatusUpdate(data) {
+        if (!data || !data.auction) return;
+
+        const auction = data.auction;
+
+        // 更新拍卖卡片状态
+        updateAuctionCardStatus(auction.id, auction.status, 'buyer');
+        updateAuctionCardStatus(auction.id, auction.status, 'seller');
+
+        // 更新拍卖卡片内的可视化器
+        if (window.auctionVisualizers && window.auctionVisualizers[auction.id]) {
+            try {
+                const visualizer = window.auctionVisualizers[auction.id];
+                
+                // 根据拍卖状态控制动画
+                if (auction.status === 'active') {
+                    visualizer.resumeAnimation();
+                } else {
+                    visualizer.pauseAnimation();
+                }
+            } catch (error) {
+                console.error(`更新拍卖 ${auction.id} 的可视化器状态失败:`, error);
+            }
+        }
+    }
+
+    // 更新拍卖卡片
+    function updateAuctionCard(auction, view) {
+        const containerId = view === 'seller' ? 'sellerAuctionsList' : 'auctionsList';
+        const container = document.getElementById(containerId);
+
+        if (!container) return;
+
+        const card = container.querySelector(`[data-auction-id="${auction.id}"]`);
+        if (!card) return;
+
+        // 更新价格显示
+        const priceElement = card.querySelector('.price-countdown');
+        if (priceElement) {
+            priceElement.textContent = `¥ ${(auction.currentPrice || 0).toFixed(2)}`;
+        }
+
+        // 更新拍卖卡片内的可视化器
+        if (window.auctionVisualizers && window.auctionVisualizers[auction.id]) {
+            try {
+                const visualizer = window.auctionVisualizers[auction.id];
+                visualizer.updatePrice(auction.currentPrice || 0);
+                
+                // 计算剩余时间
+                const timeRemaining = calculateAuctionRemainingSeconds(auction);
+                visualizer.updateRemainingTime(timeRemaining);
+                
+                // 根据拍卖状态控制动画
+                if (auction.status === 'active') {
+                    visualizer.resumeAnimation();
+                } else {
+                    visualizer.pauseAnimation();
+                }
+            } catch (error) {
+                console.error(`更新拍卖 ${auction.id} 的可视化器失败:`, error);
+            }
+        }
+
+        // 更新状态显示
+        const statusElement = card.querySelector('.auction-status');
+        if (statusElement) {
+            const statusClass = auction.status === 'active' ? 'bg-green-100 text-green-800' :
+                auction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                    auction.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800';
+
+            const statusText = auction.status === 'active' ? '进行中' :
+                auction.status === 'pending' ? '待开始' :
+                    auction.status === 'completed' ? '已完成' : '已取消';
+
+            statusElement.className = `px-2 py-1 text-xs rounded-full ${statusClass} auction-status`;
+            statusElement.textContent = statusText;
+        }
+
+        // 更新按钮状态
+        const startButton = card.querySelector('.start-auction-btn');
+        const pauseButton = card.querySelector('.pause-auction-btn');
+        const cancelButton = card.querySelector('.cancel-auction-btn');
+        const bidButton = card.querySelector('.bid-button');
+
+        if (startButton) {
+            startButton.style.display = auction.status === 'pending' ? 'inline-block' : 'none';
+        }
+
+        if (pauseButton) {
+            pauseButton.style.display = auction.status === 'active' ? 'inline-block' : 'none';
+        }
+
+        if (cancelButton) {
+            cancelButton.style.display = (auction.status === 'pending' || auction.status === 'active') ? 'inline-block' : 'none';
+        }
+
+        if (bidButton) {
+            bidButton.disabled = auction.status !== 'active';
+            bidButton.textContent = auction.status === 'active' ? '立即竞拍' :
+                auction.status === 'pending' ? '尚未开始' :
+                    auction.status === 'completed' ? '已结束' : '已取消';
+        }
+    }
+
     // 初始化荷兰钟可视化器
-    initDutchClockVisualizer();
+    initAuctionVisualizerClock();
+
+    // 设置WebSocket消息处理器
+    setupWebSocketHandlers();
 
     // 创建拍卖表单提交
     document.getElementById('createAuctionForm').addEventListener('submit', async (e) => {
@@ -16,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 竞价表单提交
     document.getElementById('bidForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        await placeBid();
+        await handleAuctionBid();
     });
 
     // 取消竞价按钮
@@ -31,258 +284,80 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // 初始化荷兰钟可视化器
-function initDutchClockVisualizer() {
+function initAuctionVisualizerClock() {
     try {
-        // 检查canvas元素是否存在
-        const canvas = document.getElementById('dutchClockCanvas');
-        if (!canvas) {
-            console.error('荷兰钟canvas元素未找到');
-            return;
+        // 初始化存储拍卖卡片可视化器的全局对象
+        if (!window.auctionVisualizers) {
+            window.auctionVisualizers = {};
         }
-
-        // 创建荷兰钟可视化器实例
-        window.dutchClockVisualizer = new DutchClockVisualizer('dutchClockCanvas');
-
-        // 检查拍卖选择器是否存在
-        const auctionSelect = document.getElementById('visualAuctionSelect');
-        if (auctionSelect) {
-            // 添加拍卖选择事件监听
-            auctionSelect.addEventListener('change', (e) => {
-                const auctionId = e.target.value;
-                if (auctionId) {
-                    loadAuctionForVisualization(auctionId);
-                } else {
-                    window.dutchClockVisualizer.reset();
-                    updateVisualAuctionInfo(null);
-                }
-            });
-        }
-
-        // 检查快速竞拍按钮是否存在
-        const quickBidButton = document.getElementById('quickBidButton');
-        if (quickBidButton && auctionSelect) {
-            // 添加快速竞拍按钮事件监听
-            quickBidButton.addEventListener('click', () => {
-                const auctionId = auctionSelect.value;
-                if (auctionId && window.dutchClockVisualizer.auction) {
-                    placeQuickBid(auctionId, window.dutchClockVisualizer.currentPrice);
-                }
-            });
-        }
-
+        
         console.log('荷兰钟可视化器初始化成功');
     } catch (error) {
         console.error('初始化荷兰钟可视化器失败:', error);
     }
 }
 
-// 加载拍卖到可视化器
-async function loadAuctionForVisualization(auctionId) {
-    try {
-        const response = await fetch('/api/dutch-auction/get', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                auction_id: parseInt(auctionId)
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || '获取拍卖详情失败');
-        }
-
-        const data = await response.json();
-
-        if (data.auction) {
-            // 确保拍卖对象有正确的当前价格
-            if (!data.auction.currentPrice) {
-                data.auction.currentPrice = data.auction.initialPrice || data.auction.startPrice || 0;
-            }
-
-            // 设置拍卖数据到可视化器
-            window.dutchClockVisualizer.setAuction(data.auction);
-
-            // 更新拍卖信息显示
-            updateVisualAuctionInfo(data.auction);
-
-            // 启用快速竞拍按钮
-            const quickBidButton = document.getElementById('quickBidButton');
-            quickBidButton.disabled = false;
-
-            // 如果拍卖正在进行中，启动递减价格计时器
-            if (data.auction.status === 'active') {
-                startVisualPriceDecrementTimer(data.auction);
-            }
-        }
-    } catch (error) {
-        console.error('加载拍卖到可视化器失败:', error);
-        showNotification(`加载拍卖详情失败: ${error.message}`, 'error');
-    }
-}
-
-// 更新可视化拍卖信息显示
-function updateVisualAuctionInfo(auction) {
-    const visualAuctionInfo = document.getElementById('visualAuctionInfo');
-
-    // 检查元素是否存在
-    if (!visualAuctionInfo) {
-        console.error('可视化拍卖信息元素未找到');
-        return;
-    }
-
-    if (!auction) {
-        visualAuctionInfo.innerHTML = `
-            <h4 class="font-medium mb-2">拍卖信息</h4>
-            <div class="text-sm text-gray-600">
-                <p>请选择一个拍卖以查看详情</p>
-            </div>
-        `;
-        return;
-    }
-
-    const statusClass = auction.status === 'active' ? 'bg-green-100 text-green-800' :
-        auction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-            auction.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                'bg-gray-100 text-gray-800';
-
-    const statusText = auction.status === 'active' ? '进行中' :
-        auction.status === 'pending' ? '待开始' :
-            auction.status === 'completed' ? '已完成' : '已取消';
-
-    visualAuctionInfo.innerHTML = `
-        <h4 class="font-medium mb-2">拍卖信息</h4>
-        <div class="space-y-2 text-sm">
-            <div class="flex justify-between">
-                <span class="text-gray-600">物品:</span>
-                <span class="font-medium">${auction.itemType === 'apple' ? '苹果' : '木材'}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">数量:</span>
-                <span class="font-medium">${auction.quantity}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">状态:</span>
-                <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">初始价格:</span>
-                <span class="font-medium">¥${(auction.initialPrice || auction.startPrice || 0).toFixed(2)}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">最低价格:</span>
-                <span class="font-medium">¥${(auction.minPrice || 0).toFixed(2)}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">递减价格:</span>
-                <span class="font-medium">¥${(auction.priceDecrement || 0).toFixed(2)}</span>
-            </div>
-            <div class="flex justify-between">
-                <span class="text-gray-600">递减间隔:</span>
-                <span class="font-medium">${auction.decrementInterval}秒</span>
-            </div>
-        </div>
-    `;
-}
-
-// 启动可视化递减价格计时器
-function startVisualPriceDecrementTimer(auction) {
-    // 使用DutchTimerManager管理可视化定时器
-    if (!auction || !window.dutchClockVisualizer) return;
-    
-    // 清除可能存在的旧定时器
-    window.timerManager.stopVisualTimer('price-decrement');
-    
-    let currentPrice = auction.currentPrice || auction.initialPrice || auction.startPrice || 0;
-    let remainingSeconds = calculateRemainingSeconds(auction);
-    
-    // 更新剩余时间显示
-    window.dutchClockVisualizer.updateRemainingTime(remainingSeconds);
-    
-    // 设置每秒更新一次，与canvas刷新频率同步
-    window.timerManager.startVisualTimer('price-decrement', () => {
-        // 只有在递减间隔秒数到达时才更新价格
-        const decrementInterval = auction.decrementInterval || 1;
-        const elapsedSeconds = (Date.now() - window.dutchClockVisualizer.lastUpdateTime) / 1000;
-        
-        if (elapsedSeconds >= decrementInterval) {
-            currentPrice -= (auction.priceDecrement || 0);
-            remainingSeconds -= decrementInterval;
-            
-            if (currentPrice <= (auction.minPrice || 0)) {
-                currentPrice = auction.minPrice || 0;
-                remainingSeconds = 0;
-                window.timerManager.stopVisualTimer('price-decrement');
-                
-                // 价格达到最低价，自动结束拍卖
-                endAuction(auction.id);
-            }
-            
-            // 更新可视化器中的价格
-            window.dutchClockVisualizer.updatePrice(currentPrice);
-            
-            // 更新剩余时间显示
-            window.dutchClockVisualizer.updateRemainingTime(Math.max(0, remainingSeconds));
-            
-            // 更新最后更新时间
-            window.dutchClockVisualizer.lastUpdateTime = Date.now();
-        }
-    }, 1000); // 每秒检查一次，但只在递减间隔到达时更新价格
-}
-
 // 更新价格显示
-function updatePriceDisplay(auctionId, region) {
-    // 获取拍卖数据
-    fetch('/api/dutch-auction/get', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            auction_id: parseInt(auctionId)
-        })
-    })
-        .then(response => response.json())
-        .then(data => {
-            const auction = data.auction;
-            if (!auction || !auction.id) return;
-            
-            // 确定元素前缀
-            const prefix = region === 'seller' ? 'seller-auction-' : 'auction-';
-            const elementId = `${prefix}${auctionId}`;
-            const auctionElement = document.getElementById(elementId);
-            
-            if (!auctionElement) return;
-            
-            // 更新价格显示
-            const priceElement = auctionElement.querySelector('.price-countdown');
-            if (priceElement) {
-                priceElement.textContent = (auction.currentPrice || 0).toFixed(2);
-            }
-            
-            // 如果价格已达到最低价，停止定时器
-            if (auction.currentPrice <= auction.minPrice) {
-                if (region === 'seller') {
-                    window.timerManager.stopSellerPriceDecrementTimer(auctionId);
-                } else {
-                    window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-                }
-                
-                // 更新拍卖状态
-                updateAuctionStatus(auctionId, 'completed');
-            }
-        })
-        .catch(error => {
-            console.error('更新价格显示失败:', error);
-        });
+function updateAuctionPrice(auctionId, region, price) {
+    // 验证价格是否有效
+    if (typeof price !== 'number' || isNaN(price) || price < 0) {
+        console.error(`无效的价格数据: 拍卖ID ${auctionId}, 价格 ${price}`);
+        return;
+    }
+
+    // 更新可视化器中的价格
+    if (window.auctionVisualizers && window.auctionVisualizers[auctionId]) {
+        try {
+            window.auctionVisualizers[auctionId].updatePrice(price);
+        } catch (error) {
+            console.error(`更新可视化器价格失败:`, error);
+        }
+    }
+
+    // 更新价格显示
+    const containerId = region === 'seller' ? 'sellerAuctionsList' : 'auctionsList';
+    const container = document.getElementById(containerId);
+    
+    if (!container) {
+        console.error(`找不到容器元素: ${containerId}`);
+        return;
+    }
+
+    // 根据区域使用不同的查找方式
+    let card;
+    if (region === 'seller') {
+        // 卖家区域使用ID查找
+        card = container.querySelector(`#seller-auction-${auctionId}`);
+    } else {
+        // 买家区域使用data-auction-id属性查找
+        card = container.querySelector(`[data-auction-id="${auctionId}"]`);
+    }
+    
+    if (!card) {
+        console.error(`找不到拍卖卡片: 拍卖ID ${auctionId}, 区域: ${region}`);
+        return;
+    }
+
+    // 更新价格显示
+    const priceElement = card.querySelector('.price-countdown');
+    if (priceElement) {
+        priceElement.textContent = `¥ ${price.toFixed(2)}`;
+    }
+}
+
+// 更新剩余时间显示
+function updateAuctionTimeRemaining(timeRemaining) {
+    // 验证剩余时间是否有效
+    if (typeof timeRemaining !== 'number' || isNaN(timeRemaining) || timeRemaining < 0) {
+        console.error(`无效的剩余时间数据: ${timeRemaining}`);
+        return;
+    }
 }
 
 // 更新拍卖状态
 function updateAuctionStatus(auctionId, status) {
     // 获取拍卖数据
-    fetch('/api/dutch-auction/get', {
+    fetch('/api/auction/get', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -295,13 +370,13 @@ function updateAuctionStatus(auctionId, status) {
         .then(data => {
             const auction = data.auction;
             if (!auction || !auction.id) return;
-            
+
             // 更新卖家区域
             const sellerElement = document.getElementById(`seller-auction-${auctionId}`);
             if (sellerElement) {
                 updateAuctionCardStatus(sellerElement, status);
             }
-            
+
             // 更新买家区域
             const buyerElement = document.getElementById(`auction-${auctionId}`);
             if (buyerElement) {
@@ -316,15 +391,15 @@ function updateAuctionStatus(auctionId, status) {
 // 更新拍卖卡片状态
 function updateAuctionCardStatus(element, status) {
     if (!element) return;
-    
+
     const statusElement = element.querySelector('.px-2.py-1.text-xs.rounded-full');
     if (statusElement) {
         // 移除所有状态类
-        statusElement.classList.remove('bg-green-100', 'text-green-800', 
-                                    'bg-yellow-100', 'text-yellow-800', 
-                                    'bg-blue-100', 'text-blue-800',
-                                    'bg-gray-100', 'text-gray-800');
-        
+        statusElement.classList.remove('bg-green-100', 'text-green-800',
+            'bg-yellow-100', 'text-yellow-800',
+            'bg-blue-100', 'text-blue-800',
+            'bg-gray-100', 'text-gray-800');
+
         // 添加新状态类
         if (status === 'active') {
             statusElement.classList.add('bg-green-100', 'text-green-800');
@@ -340,7 +415,7 @@ function updateAuctionCardStatus(element, status) {
             statusElement.textContent = '已取消';
         }
     }
-    
+
     // 更新按钮区域
     const buttonContainer = element.querySelector('.mt-4.flex, .mt-4.flex-col');
     if (buttonContainer) {
@@ -354,86 +429,10 @@ function updateAuctionCardStatus(element, status) {
     }
 }
 
-// 计算剩余时间
-function calculateRemainingSeconds(auction) {
-    const startPrice = auction.initialPrice || auction.startPrice || 0;
-    const priceRange = startPrice - (auction.minPrice || 0);
-    const currentPriceOffset = (auction.currentPrice || 0) - (auction.minPrice || 0);
-    const remainingDecrementSteps = Math.ceil(currentPriceOffset / (auction.priceDecrement || 1));
-    return remainingDecrementSteps * (auction.decrementInterval || 1);
-}
-
-// 快速竞拍
-async function placeQuickBid(auctionId, bidAmount) {
-    try {
-        const response = await fetch('/api/dutch-auction/bid', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                auction_id: parseInt(auctionId),
-                bid_amount: bidAmount
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showNotification('竞价成功');
-
-            // 使用DutchTimerManager清除定时器
-            window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-            window.timerManager.stopVisualTimer('price-decrement');
-
-            // 刷新页面数据
-            loadBalance();
-            loadAuctions();
-            loadSellerAuctions();
-
-            // 重新加载当前拍卖以更新状态
-            loadAuctionForVisualization(auctionId);
-        } else {
-            showNotification(data.message || '竞价失败', 'error');
-        }
-    } catch (error) {
-        console.error('快速竞价失败:', error);
-        showNotification('竞价失败', 'error');
-    }
-}
-
-// 加载现金余额
-async function loadBalance() {
-    try {
-        const response = await fetch('/api/market/balance');
-        if (!response.ok) {
-            throw new Error('Failed to load balance');
-        }
-
-        const balance = await response.json();
-
-        // 更新余额显示
-        const balanceAmount = document.getElementById('balanceAmount');
-        if (balanceAmount) {
-            balanceAmount.textContent = formatCurrency(balance.amount);
-        }
-
-        // 更新最后更新时间
-        const lastUpdated = document.getElementById('lastUpdated');
-        if (lastUpdated) {
-            const date = new Date(balance.updated_at);
-            lastUpdated.textContent = `最后更新: ${formatDateTime(date)}`;
-        }
-    } catch (error) {
-        console.error('Error loading balance:', error);
-        showNotification('加载余额失败', 'error');
-    }
-}
-
 // 加载卖家拍卖列表
 async function loadSellerAuctions() {
     try {
-        const response = await fetch('/api/dutch-auction/seller-list');
+        const response = await fetch('/api/auction/seller-list');
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -461,7 +460,7 @@ async function loadSellerAuctions() {
 
                 // 如果拍卖已开始且未结束，启动递减价格计时器
                 if (auction.status === 'active') {
-                    startPriceDecrementTimer(auction.id, auction.currentPrice, auction.minPrice, auction.priceDecrement, auction.decrementInterval);
+                    startAuctionPriceDecrementTimer(auction.id, auction.currentPrice, auction.minPrice, auction.priceDecrement, auction.decrementInterval);
                 }
             });
         } else {
@@ -500,16 +499,12 @@ function createSellerAuctionCard(auction) {
                     <span class="font-medium">${auction.quantity}</span>
                 </div>
                 <div class="flex justify-between">
-                    <span class="text-gray-600">当前价格:</span>
-                    <span id="current-price-${auction.id}" class="price-countdown font-bold text-lg text-indigo-600">${(auction.currentPrice || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
                     <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">${(auction.minPrice || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥${(auction.minPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">${(auction.priceDecrement || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥${(auction.priceDecrement || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减间隔:</span>
@@ -545,7 +540,7 @@ function createSellerAuctionCard(auction) {
 // 加载拍卖列表
 async function loadAuctions() {
     try {
-        const response = await fetch('/api/dutch-auction/list');
+        const response = await fetch('/api/auction/list');
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -564,41 +559,14 @@ async function loadAuctions() {
 
         auctionsList.innerHTML = '';
 
-        // 更新可视化器的拍卖选择器
-        const visualAuctionSelect = document.getElementById('visualAuctionSelect');
-        if (visualAuctionSelect) {
-            visualAuctionSelect.innerHTML = '<option value="">选择拍卖</option>';
-        }
-
         if (data.auctions && data.auctions.length > 0) {
             data.auctions.forEach(auction => {
                 const auctionCard = createAuctionCard(auction);
                 auctionsList.appendChild(auctionCard);
 
-                // 添加到可视化器的选择器中
-                if (visualAuctionSelect) {
-                    const option = document.createElement('option');
-                    option.value = auction.id;
-
-                    // 添加状态前缀
-                    let statusPrefix = '';
-                    if (auction.status === 'active') {
-                        statusPrefix = '[进行中] ';
-                    } else if (auction.status === 'pending') {
-                        statusPrefix = '[待开始] ';
-                    } else if (auction.status === 'completed') {
-                        statusPrefix = '[已完成] ';
-                    } else {
-                        statusPrefix = '[已取消] ';
-                    }
-
-                    option.textContent = statusPrefix + `${auction.itemType === 'apple' ? '苹果' : '木材'} x${auction.quantity} - ¥${(auction.currentPrice || 0).toFixed(2)}`;
-                    visualAuctionSelect.appendChild(option);
-                }
-
                 // 如果拍卖已开始且未结束，启动递减价格计时器
                 if (auction.status === 'active') {
-                    startPriceDecrementTimer(auction.id, auction.currentPrice, auction.minPrice, auction.priceDecrement, auction.decrementInterval);
+                    startAuctionPriceDecrementTimer(auction.id, auction.currentPrice, auction.minPrice, auction.priceDecrement, auction.decrementInterval);
                 }
             });
         } else {
@@ -615,6 +583,7 @@ function createAuctionCard(auction) {
     const card = document.createElement('div');
     card.className = 'auction-card bg-white rounded-lg shadow-md overflow-hidden';
     card.id = `auction-${auction.id}`;
+    card.setAttribute('data-auction-id', auction.id);
 
     const statusClass = auction.status === 'active' ? 'bg-green-100 text-green-800' :
         auction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
@@ -624,11 +593,21 @@ function createAuctionCard(auction) {
         auction.status === 'pending' ? '待开始' :
             auction.status === 'completed' ? '已完成' : '已取消';
 
+    // 为每个拍卖卡片创建唯一的canvas ID
+    const canvasId = `dutch-clock-canvas-${auction.id}`;
+
     card.innerHTML = `
         <div class="p-4">
             <div class="flex justify-between items-start mb-2">
                 <h3 class="text-lg font-semibold">${auction.itemType === 'apple' ? '苹果' : '木材'}</h3>
                 <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
+            </div>
+            <!-- 荷兰钟可视化区域 -->
+            <div class="mb-4 flex flex-col items-center">
+                <span class="mb-2">荷兰钟可视化</span>
+                <div class="bg-gray-50 rounded-lg p-2">
+                    <canvas id="${canvasId}" width="200" height="200" class="border border-gray-300 rounded-lg shadow-inner"></canvas>
+                </div>
             </div>
             <div class="space-y-2">
                 <div class="flex justify-between">
@@ -637,15 +616,15 @@ function createAuctionCard(auction) {
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">当前价格:</span>
-                    <span id="current-price-${auction.id}" class="price-countdown font-bold text-lg text-indigo-600">${(auction.currentPrice || 0).toFixed(2)}</span>
+                    <span class="price-countdown font-bold text-lg text-indigo-600">¥ ${(auction.currentPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">${(auction.minPrice || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.minPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">${(auction.priceDecrement || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.priceDecrement || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减间隔:</span>
@@ -655,7 +634,7 @@ function createAuctionCard(auction) {
             <div class="mt-4 flex space-x-2">
                 ${auction.status === 'active' ?
             `<button class="bid-button flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition" 
-                            onclick="openBidModal(${auction.id}, '${auction.itemType}', ${auction.currentPrice}, ${auction.minPrice}, ${auction.quantity})">
+                            onclick="openAuctionBidModal(${auction.id}, '${auction.itemType}', ${auction.currentPrice}, ${auction.minPrice}, ${auction.quantity})">
                         竞价
                     </button>` : ''}
                 ${auction.status === 'pending' ?
@@ -669,6 +648,40 @@ function createAuctionCard(auction) {
             </div>
         </div>
     `;
+
+    // 在卡片添加到DOM后初始化荷兰钟可视化
+    setTimeout(() => {
+        try {
+            // 创建荷兰钟可视化器实例
+            const visualizer = new AuctionClockVisualizer(canvasId);
+            
+            // 确保拍卖对象有正确的当前价格
+            if (!auction.currentPrice) {
+                auction.currentPrice = auction.initialPrice || auction.startPrice || 0;
+            }
+            
+            // 计算并设置剩余时间
+            auction.timeRemaining = calculateAuctionRemainingSeconds(auction);
+            
+            // 设置拍卖数据到可视化器
+            visualizer.setAuction(auction);
+            
+            // 存储可视化器实例以便后续更新
+            if (!window.auctionVisualizers) {
+                window.auctionVisualizers = {};
+            }
+            window.auctionVisualizers[auction.id] = visualizer;
+            
+            // 如果拍卖状态为活跃，启动动画
+            if (auction.status === 'active') {
+                visualizer.resumeAnimation();
+            } else {
+                visualizer.pauseAnimation();
+            }
+        } catch (error) {
+            console.error(`初始化拍卖 ${auction.id} 的荷兰钟可视化失败:`, error);
+        }
+    }, 100);
 
     return card;
 }
@@ -697,7 +710,7 @@ async function createAuction() {
     const priceDecrementAmount = parseInt(priceDecrementAmountElement.value);
 
     try {
-        const response = await fetch('/api/dutch-auction/create', {
+        const response = await fetch('/api/auction/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -734,7 +747,7 @@ async function createAuction() {
 // 暂停拍卖（下架）
 async function pauseAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/pause', {
+        const response = await fetch('/api/auction/pause', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -770,7 +783,7 @@ async function pauseAuction(auctionId) {
 // 开始拍卖
 async function startAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/start', {
+        const response = await fetch('/api/auction/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -786,11 +799,11 @@ async function startAuction(auctionId) {
             showNotification('拍卖已开始');
             loadAuctions();
             loadSellerAuctions();
-            
+
             // 启动价格递减定时器
             // 重新获取拍卖数据以获取最新的价格信息
             try {
-                const auctionResponse = await fetch('/api/dutch-auction/get', {
+                const auctionResponse = await fetch('/api/auction/get', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -802,7 +815,7 @@ async function startAuction(auctionId) {
                 if (auctionResponse.ok) {
                     const auctionData = await auctionResponse.json();
                     if (auctionData.auction && auctionData.auction.status === 'active') {
-                        startPriceDecrementTimer(auctionData.auction);
+                        startAuctionPriceDecrementTimer(auctionData.auction);
                     }
                 }
             } catch (error) {
@@ -820,7 +833,7 @@ async function startAuction(auctionId) {
 // 取消拍卖
 async function cancelAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/cancel', {
+        const response = await fetch('/api/auction/cancel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -834,13 +847,13 @@ async function cancelAuction(auctionId) {
 
         if (data.success) {
             showNotification('拍卖已取消');
-            
+
             // 清除递减价格计时器
             if (window.priceTimers && window.priceTimers[auctionId]) {
                 clearInterval(window.priceTimers[auctionId]);
                 delete window.priceTimers[auctionId];
             }
-            
+
             loadAuctions();
             loadSellerAuctions();
         } else {
@@ -853,7 +866,7 @@ async function cancelAuction(auctionId) {
 }
 
 // 打开竞价模态框
-function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
+function openAuctionBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
     const bidModal = document.getElementById('bidModal');
     const bidInfo = document.getElementById('bidInfo');
     const bidAmount = document.getElementById('bidAmount');
@@ -876,11 +889,11 @@ function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
             </div>
             <div class="flex justify-between">
                 <span class="text-gray-600">当前价格:</span>
-                <span class="font-bold text-indigo-600">${(currentPrice || 0).toFixed(2)}</span>
+                <span class="font-bold text-indigo-600">¥ ${(currentPrice || 0).toFixed(2)}</span>
             </div>
             <div class="flex justify-between">
                 <span class="text-gray-600">最低价格:</span>
-                <span class="font-medium">${(minPrice || 0).toFixed(2)}</span>
+                <span class="font-medium">¥ ${(minPrice || 0).toFixed(2)}</span>
             </div>
         </div>
     `;
@@ -894,7 +907,7 @@ function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
 }
 
 // 提交竞价
-async function placeBid() {
+async function handleAuctionBid() {
     const bidModal = document.getElementById('bidModal');
 
     // 检查元素是否存在
@@ -907,7 +920,7 @@ async function placeBid() {
     const bidAmount = parseInt(document.getElementById('bidAmount').value);
 
     try {
-        const response = await fetch('/api/dutch-auction/bid', {
+        const response = await fetch('/api/auction/bid', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -936,7 +949,7 @@ async function placeBid() {
             // 如果当前在可视化器中显示的是这个拍卖，更新其状态
             const visualAuctionSelect = document.getElementById('visualAuctionSelect');
             if (visualAuctionSelect && visualAuctionSelect.value == auctionId) {
-                loadAuctionForVisualization(auctionId);
+                loadAuctionVisualizer(auctionId);
             }
         } else {
             showNotification(data.message || '竞价失败', 'error');
@@ -951,53 +964,42 @@ async function placeBid() {
 window.priceTimers = window.priceTimers || {};
 
 // 启动递减价格计时器
-function startPriceDecrementTimer(auction) {
+function startAuctionPriceDecrementTimer(auction) {
     if (!auction || !auction.id) return;
-    
+
     try {
-        // 根据拍卖状态决定使用哪个区域的定时器
-        const isSellerView = document.getElementById('sellerAuctionsList').querySelector(`[data-auction-id="${auction.id}"]`);
+        // 同时启动买家和卖家区域的定时器
+        const decrementInterval = (auction.decrementInterval || 1) * 1000; // 转换为毫秒
         
-        if (isSellerView) {
-            // 卖家区域，启动卖家区域定时器
-            const decrementInterval = (auction.decrementInterval || 1) * 1000; // 转换为毫秒
-            window.timerManager.startSellerPriceDecrementTimer(
-                auction.id,
-                () => updatePriceDisplay(auction.id, 'seller'),
-                decrementInterval
-            );
-        } else {
-            // 买家区域，启动买家区域定时器
-            const decrementInterval = (auction.decrementInterval || 1) * 1000; // 转换为毫秒
-            window.timerManager.startBuyerPriceDecrementTimer(
-                auction.id,
-                () => updatePriceDisplay(auction.id, 'buyer'),
-                decrementInterval
-            );
-            
-            // 如果有可视化器，也启动可视化器定时器
-            if (window.dutchClockVisualizer && window.dutchClockVisualizer.isVisible) {
-                window.timerManager.startVisualTimer('price-decrement', auction, 1000);
-            }
-        }
+        // 启动卖家区域定时器
+        window.timerManager.startSellerPriceDecrementTimer(
+            auction.id,
+            () => updateAuctionPrice(auction.id, 'seller'),
+            decrementInterval
+        );
+        
+        // 启动买家区域定时器
+        window.timerManager.startBuyerPriceDecrementTimer(
+            auction.id,
+            () => updateAuctionPrice(auction.id, 'buyer'),
+            decrementInterval
+        );
     } catch (error) {
         console.error('启动价格递减定时器失败:', error);
     }
 }
 
 // 计算剩余时间
-function calculateRemainingSeconds(auction) {
-    const startPrice = auction.initialPrice || auction.startPrice || 0;
-    const priceRange = startPrice - (auction.minPrice || 0);
+function calculateAuctionRemainingSeconds(auction) {
     const currentPriceOffset = (auction.currentPrice || 0) - (auction.minPrice || 0);
     const remainingDecrementSteps = Math.ceil(currentPriceOffset / (auction.priceDecrement || 1));
     return remainingDecrementSteps * (auction.decrementInterval || 1);
 }
 
-// 快速竞拍
-async function placeQuickBid(auctionId, bidAmount) {
+// 处理快速竞拍
+async function handleQuickBid(auctionId, bidAmount) {
     try {
-        const response = await fetch('/api/dutch-auction/bid', {
+        const response = await fetch('/api/auction/bid', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1019,17 +1021,12 @@ async function placeQuickBid(auctionId, bidAmount) {
                 window.timerManager.stopSellerPriceDecrementTimer(auctionId);
                 // 清除买家区域的价格递减定时器
                 window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-                // 清除可视化器定时器
-                window.timerManager.stopVisualTimer('price-decrement');
             }
 
             // 刷新页面数据
             loadBalance();
             loadAuctions();
             loadSellerAuctions();
-
-            // 重新加载当前拍卖以更新状态
-            loadAuctionForVisualization(auctionId);
         } else {
             showNotification(data.message || '竞价失败', 'error');
         }
@@ -1042,24 +1039,29 @@ async function placeQuickBid(auctionId, bidAmount) {
 // 加载现金余额
 async function loadBalance() {
     try {
-        const response = await fetch('/api/market/balance');
-        if (!response.ok) {
-            throw new Error('Failed to load balance');
-        }
+        const response = await fetch('/api/cash/balance');
+        if (response.ok) {
+            const data = await response.json();
 
-        const balance = await response.json();
+            // 检查响应数据结构
+            if (!data.success || !data.balance) {
+                throw new Error('Invalid balance data response');
+            }
 
-        // 更新余额显示
-        const balanceAmount = document.getElementById('balanceAmount');
-        if (balanceAmount) {
-            balanceAmount.textContent = formatCurrency(balance.amount);
-        }
+            const balance = data.balance;
 
-        // 更新最后更新时间
-        const lastUpdated = document.getElementById('lastUpdated');
-        if (lastUpdated) {
-            const date = new Date(balance.updated_at);
-            lastUpdated.textContent = `最后更新: ${formatDateTime(date)}`;
+            // 更新余额显示
+            const balanceAmount = document.getElementById('balanceAmount');
+            if (balanceAmount) {
+                balanceAmount.textContent = formatCurrency(balance.amount || 0);
+            }
+
+            // 更新最后更新时间
+            const lastUpdated = document.getElementById('lastUpdated');
+            if (lastUpdated) {
+                const date = new Date(balance.updated_at);
+                lastUpdated.textContent = `最后更新: ${formatDateTime(date)}`;
+            }
         }
     } catch (error) {
         console.error('Error loading balance:', error);
@@ -1075,7 +1077,7 @@ async function loadSellerAuctions() {
             window.timerManager.stopAllSellerTimers();
         }
 
-        const response = await fetch('/api/dutch-auction/seller-list');
+        const response = await fetch('/api/auction/seller-list');
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -1103,7 +1105,7 @@ async function loadSellerAuctions() {
 
                 // 如果拍卖已开始且未结束，启动递减价格计时器
                 if (auction.status === 'active') {
-                    startPriceDecrementTimer(auction);
+                    startAuctionPriceDecrementTimer(auction);
                 }
             });
         } else {
@@ -1143,15 +1145,15 @@ function createSellerAuctionCard(auction) {
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">当前价格:</span>
-                    <span class="price-countdown font-bold text-lg text-indigo-600">${(auction.currentPrice || 0).toFixed(2)}</span>
+                    <span class="price-countdown font-bold text-lg text-indigo-600">¥ ${(auction.currentPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">${(auction.minPrice || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.minPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">${(auction.priceDecrement || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.priceDecrement || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减间隔:</span>
@@ -1192,7 +1194,7 @@ async function loadAuctions() {
             window.timerManager.stopAllBuyerTimers();
         }
 
-        const response = await fetch('/api/dutch-auction/list');
+        const response = await fetch('/api/auction/list');
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -1211,41 +1213,14 @@ async function loadAuctions() {
 
         auctionsList.innerHTML = '';
 
-        // 更新可视化器的拍卖选择器
-        const visualAuctionSelect = document.getElementById('visualAuctionSelect');
-        if (visualAuctionSelect) {
-            visualAuctionSelect.innerHTML = '<option value="">选择拍卖</option>';
-        }
-
         if (data.auctions && data.auctions.length > 0) {
             data.auctions.forEach(auction => {
                 const auctionCard = createAuctionCard(auction);
                 auctionsList.appendChild(auctionCard);
 
-                // 添加到可视化器的选择器中
-                if (visualAuctionSelect) {
-                    const option = document.createElement('option');
-                    option.value = auction.id;
-
-                    // 添加状态前缀
-                    let statusPrefix = '';
-                    if (auction.status === 'active') {
-                        statusPrefix = '[进行中] ';
-                    } else if (auction.status === 'pending') {
-                        statusPrefix = '[待开始] ';
-                    } else if (auction.status === 'completed') {
-                        statusPrefix = '[已完成] ';
-                    } else {
-                        statusPrefix = '[已取消] ';
-                    }
-
-                    option.textContent = statusPrefix + `${auction.itemType === 'apple' ? '苹果' : '木材'} x${auction.quantity} - ¥${(auction.currentPrice || 0).toFixed(2)}`;
-                    visualAuctionSelect.appendChild(option);
-
-                    // 如果拍卖已开始且未结束，启动递减价格计时器
-                    if (auction.status === 'active') {
-                        startPriceDecrementTimer(auction);
-                    }
+                // 如果拍卖已开始且未结束，启动递减价格计时器
+                if (auction.status === 'active') {
+                    startAuctionPriceDecrementTimer(auction);
                 }
             });
         } else {
@@ -1258,68 +1233,7 @@ async function loadAuctions() {
     }
 }
 
-// 创建拍卖卡片
-function createAuctionCard(auction) {
-    const card = document.createElement('div');
-    card.className = 'auction-card bg-white rounded-lg shadow-md overflow-hidden';
-    card.id = `auction-${auction.id}`;
 
-    const statusClass = auction.status === 'active' ? 'bg-green-100 text-green-800' :
-        auction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-            'bg-gray-100 text-gray-800';
-
-    const statusText = auction.status === 'active' ? '进行中' :
-        auction.status === 'pending' ? '待开始' :
-            auction.status === 'completed' ? '已完成' : '已取消';
-
-    card.innerHTML = `
-        <div class="p-4">
-            <div class="flex justify-between items-start mb-2">
-                <h3 class="text-lg font-semibold">${auction.itemType === 'apple' ? '苹果' : '木材'}</h3>
-                <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
-            </div>
-            <div class="space-y-2">
-                <div class="flex justify-between">
-                    <span class="text-gray-600">数量:</span>
-                    <span class="font-medium">${auction.quantity}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">当前价格:</span>
-                    <span class="price-countdown font-bold text-lg text-indigo-600">${(auction.currentPrice || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">${(auction.minPrice || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">${(auction.priceDecrement || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">递减间隔:</span>
-                    <span class="font-medium">${auction.decrementInterval}秒</span>
-                </div>
-            </div>
-            <div class="mt-4 flex space-x-2">
-                ${auction.status === 'active' ?
-            `<button class="bid-button flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition" 
-                            onclick="openBidModal(${auction.id}, '${auction.itemType}', ${auction.currentPrice}, ${auction.minPrice}, ${auction.quantity})">
-                        竞价
-                    </button>` : ''}
-                ${auction.status === 'pending' ?
-            `<div class="flex-1 text-center text-gray-500 py-2">
-                        拍卖尚未开始
-                    </div>` : ''}
-                ${auction.status === 'completed' || auction.status === 'cancelled' ?
-            `<div class="flex-1 text-center text-gray-500 py-2">
-                        拍卖已结束
-                    </div>` : ''}
-            </div>
-        </div>
-    `;
-
-    return card;
-}
 
 // 创建拍卖
 async function createAuction() {
@@ -1331,7 +1245,7 @@ async function createAuction() {
     const priceDecrementAmount = parseInt(document.getElementById('priceDecrementAmount').value);
 
     try {
-        const response = await fetch('/api/dutch-auction/create', {
+        const response = await fetch('/api/auction/create', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1365,7 +1279,7 @@ async function createAuction() {
 // 暂停拍卖（下架）
 async function pauseAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/pause', {
+        const response = await fetch('/api/auction/pause', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1389,8 +1303,6 @@ async function pauseAuction(auctionId) {
             window.timerManager.stopSellerPriceDecrementTimer(auctionId);
             // 清除买家区域的价格递减定时器
             window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-            // 清除可视化器定时器
-            window.timerManager.stopVisualTimer('price-decrement');
         }
 
         // 刷新拍卖列表
@@ -1405,7 +1317,7 @@ async function pauseAuction(auctionId) {
 // 开始拍卖
 async function startAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/start', {
+        const response = await fetch('/api/auction/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1433,7 +1345,7 @@ async function startAuction(auctionId) {
 // 取消拍卖
 async function cancelAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/cancel', {
+        const response = await fetch('/api/auction/cancel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1454,8 +1366,6 @@ async function cancelAuction(auctionId) {
                 window.timerManager.stopSellerPriceDecrementTimer(auctionId);
                 // 清除买家区域的价格递减定时器
                 window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-                // 清除可视化器定时器
-                window.timerManager.stopVisualTimer('price-decrement');
             }
 
             loadAuctions();
@@ -1470,7 +1380,7 @@ async function cancelAuction(auctionId) {
 }
 
 // 打开竞价模态框
-function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
+function openAuctionBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
     const bidModal = document.getElementById('bidModal');
     const bidInfo = document.getElementById('bidInfo');
     const bidAmount = document.getElementById('bidAmount');
@@ -1493,11 +1403,11 @@ function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
             </div>
             <div class="flex justify-between">
                 <span class="text-gray-600">当前价格:</span>
-                <span class="font-bold text-indigo-600">${(currentPrice || 0).toFixed(2)}</span>
+                <span class="font-bold text-indigo-600">¥ ${(currentPrice || 0).toFixed(2)}</span>
             </div>
             <div class="flex justify-between">
                 <span class="text-gray-600">最低价格:</span>
-                <span class="font-medium">${(minPrice || 0).toFixed(2)}</span>
+                <span class="font-medium">¥ ${(minPrice || 0).toFixed(2)}</span>
             </div>
         </div>
     `;
@@ -1511,13 +1421,20 @@ function openBidModal(auctionId, itemType, currentPrice, minPrice, quantity) {
 }
 
 // 提交竞价
-async function placeBid() {
+async function handleAuctionBid() {
     const bidModal = document.getElementById('bidModal');
+
+    // 检查元素是否存在
+    if (!bidModal) {
+        console.error('竞价模态框元素未找到');
+        return;
+    }
+
     const auctionId = parseInt(bidModal.dataset.auctionId);
     const bidAmount = parseInt(document.getElementById('bidAmount').value);
 
     try {
-        const response = await fetch('/api/dutch-auction/bid', {
+        const response = await fetch('/api/auction/bid', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1540,19 +1457,11 @@ async function placeBid() {
                 window.timerManager.stopSellerPriceDecrementTimer(auctionId);
                 // 清除买家区域的价格递减定时器
                 window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-                // 清除可视化器定时器
-                window.timerManager.stopVisualTimer('price-decrement');
             }
 
             loadBalance();
             loadAuctions();
             loadSellerAuctions();
-
-            // 如果当前在可视化器中显示的是这个拍卖，更新其状态
-            const visualAuctionSelect = document.getElementById('visualAuctionSelect');
-            if (visualAuctionSelect.value == auctionId) {
-                loadAuctionForVisualization(auctionId);
-            }
         } else {
             showNotification(data.message || '竞价失败', 'error');
         }
@@ -1565,7 +1474,7 @@ async function placeBid() {
 // 结束拍卖
 async function endAuction(auctionId) {
     try {
-        const response = await fetch('/api/dutch-auction/end', {
+        const response = await fetch('/api/auction/end', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1586,19 +1495,11 @@ async function endAuction(auctionId) {
                 window.timerManager.stopSellerPriceDecrementTimer(auctionId);
                 // 清除买家区域的价格递减定时器
                 window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-                // 清除可视化器定时器
-                window.timerManager.stopVisualTimer();
             }
 
             // 刷新拍卖列表
             loadAuctions();
             loadSellerAuctions();
-
-            // 如果当前在可视化器中显示的是这个拍卖，更新其状态
-            const visualAuctionSelect = document.getElementById('visualAuctionSelect');
-            if (visualAuctionSelect && visualAuctionSelect.value == auctionId) {
-                loadAuctionForVisualization(auctionId);
-            }
         } else {
             showNotification(data.message || '结束拍卖失败', 'error');
         }
@@ -1659,6 +1560,11 @@ function formatCurrency(amount) {
     const currencySymbol = '¥';
     let formattedAmount = '';
 
+    // 检查 amount 是否为 undefined 或 null
+    if (amount === undefined || amount === null) {
+        return `${currencySymbol} 0.00`;
+    }
+
     if (amount > 0) {
         formattedAmount = `${formatNumberWithCommas(amount.toFixed(2))}`;
     } else if (amount === 0) {
@@ -1672,4 +1578,64 @@ function formatCurrency(amount) {
 // 格式化数字，添加千位分隔符
 function formatNumberWithCommas(number) {
     return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+// 价格校验函数
+/**
+ * 验证价格是否合理
+ * @param {Object} auction - 拍卖数据
+ * @param {number} newPrice - 新价格
+ * @returns {boolean} - 价格是否合理
+ */
+function validateAuctionPrice(auction, newPrice) {
+    if (!auction || typeof newPrice !== 'number') {
+        console.error('价格验证失败：无效的参数');
+        return false;
+    }
+
+    // 检查价格是否在合理范围内
+    const minPrice = auction.minPrice || auction.min_price || 0;
+    const maxPrice = auction.initialPrice || auction.initial_price || auction.startPrice || 0;
+
+    if (newPrice < minPrice || newPrice > maxPrice) {
+        console.warn(`价格验证警告：价格 ${newPrice} 超出合理范围 [${minPrice}, ${maxPrice}]`);
+        return false;
+    }
+
+    // 检查价格变化是否合理（价格应该递减）
+    const currentPrice = auction.currentPrice || auction.current_price || maxPrice;
+    if (newPrice > currentPrice) {
+        console.warn(`价格验证警告：价格 ${newPrice} 高于当前价格 ${currentPrice}`);
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * 验证剩余时间是否合理
+ * @param {Object} auction - 拍卖数据
+ * @param {number} timeRemaining - 剩余时间（秒）
+ * @returns {boolean} - 时间是否合理
+ */
+function validateAuctionTimeRemaining(auction, timeRemaining) {
+    if (!auction || typeof timeRemaining !== 'number') {
+        console.error('时间验证失败：无效的参数');
+        return false;
+    }
+
+    // 检查时间是否为负数
+    if (timeRemaining < 0) {
+        console.warn(`时间验证警告：剩余时间 ${timeRemaining} 为负数`);
+        return false;
+    }
+
+    // 检查时间是否过长（超过24小时）
+    const maxTime = 24 * 60 * 60; // 24小时，单位：秒
+    if (timeRemaining > maxTime) {
+        console.warn(`时间验证警告：剩余时间 ${timeRemaining} 过长`);
+        return false;
+    }
+
+    return true;
 }
