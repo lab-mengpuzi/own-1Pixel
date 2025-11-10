@@ -13,6 +13,7 @@ import (
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/market"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -279,12 +280,19 @@ func main() {
 	logger.Init("")
 
 	// 打开数据库连接
-	db, err = sql.Open("sqlite", _config.DbPath)
+	// 添加SQLite特定参数以提高并发性能
+	dbPathWithParams := fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.DbPath)
+	db, err = sql.Open("sqlite", dbPathWithParams)
 	if err != nil {
 		logger.Info("main", fmt.Sprintf("打开数据库失败: %v\n", err))
 		fmt.Printf("打开数据库失败: %v", err)
 		return
 	}
+	
+	// 设置连接池参数，提高并发性能
+	db.SetMaxOpenConns(25) // 设置最大打开连接数
+	db.SetMaxIdleConns(5)  // 设置最大空闲连接数
+	db.SetConnMaxLifetime(5 * time.Minute) // 设置连接最大生存时间
 
 	// 初始化数据库
 	err = initDatabase()

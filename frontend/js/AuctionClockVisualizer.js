@@ -40,6 +40,7 @@ class AuctionClockVisualizer {
         
         // 价格刻度
         this.priceTicks = [];
+        this.subTicks = []; // 次刻度数组
         
         // 初始化
         this.init();
@@ -57,11 +58,17 @@ class AuctionClockVisualizer {
      * @param {Object} auction - 拍卖数据
      */
     setAuction(auction) {
+        // 确保拍卖对象存在
+        if (!auction) {
+            console.error('拍卖对象为空，无法设置拍卖数据');
+            return;
+        }
+        
         this.auction = auction;
         this.currentPrice = auction.currentPrice || 0;
         this.minPrice = auction.minPrice || 0;
         this.maxPrice = auction.initialPrice || auction.startPrice || 0;
-        this.priceDecrement = auction.priceDecrement || 0;
+        this.priceDecrement = auction.priceDecrement || 1; // 默认递减量为1
         this.decrementInterval = auction.decrementInterval || 1; // 默认1秒
         
         // 初始化最后更新时间
@@ -100,27 +107,58 @@ class AuctionClockVisualizer {
     
     /**
      * 生成价格刻度
+     * 生成主刻度和次刻度
      */
     generatePriceTicks() {
+        // 确保数组已初始化
         this.priceTicks = [];
+        this.subTicks = []; // 次刻度数组
         
-        // 根据初始价格和递减价格计算刻度数量
+        // 检查价格数据是否有效
+        if (this.maxPrice <= this.minPrice || this.priceDecrement <= 0) {
+            console.warn('价格数据无效，无法生成刻度');
+            return;
+        }
+        
+        // 根据初始价格和递减价格计算主刻度数量
         const totalDecrementSteps = Math.ceil((this.maxPrice - this.minPrice) / this.priceDecrement);
-        const tickCount = Math.min(totalDecrementSteps, 20); // 限制最多20个刻度
+        const mainTickCount = Math.min(totalDecrementSteps, 20); // 限制最多20个主刻度
         
-        for (let i = 0; i <= tickCount; i++) {
+        // 生成主刻度
+        for (let i = 0; i <= mainTickCount; i++) {
             // 逆时针方向，从0度开始
             // 保留一个刻度的间隔，所以实际使用范围是 0 到 360-18 度
-            const angle = (Math.PI * 2 * 0.95 * i) / tickCount;
+            const angle = (Math.PI * 2 * 0.95 * i) / mainTickCount;
             
             // 从初始价格开始，逆时针向最低价格递减
-            const price = this.maxPrice - ((this.maxPrice - this.minPrice) * (i / tickCount));
+            const price = this.maxPrice - ((this.maxPrice - this.minPrice) * (i / mainTickCount));
             
             this.priceTicks.push({
                 angle: angle,
                 price: price,
-                label: this.formatPrice(price)
+                label: this.formatPrice(price),
+                isMain: true
             });
+            
+            // 在每个主刻度之间生成4个次刻度（每个次刻度代表1的价格单位）
+            if (i < mainTickCount) {
+                const nextPrice = this.maxPrice - ((this.maxPrice - this.minPrice) * ((i + 1) / mainTickCount));
+                const priceDiff = nextPrice - price;
+                
+                // 如果价格差大于等于4，则生成次刻度
+                if (Math.abs(priceDiff) >= 4) {
+                    for (let j = 1; j <= 4; j++) {
+                        const subPrice = price - (j * Math.abs(priceDiff) / 5);
+                        const subAngle = angle + (Math.PI * 2 * 0.95 * j) / (mainTickCount * 5);
+                        
+                        this.subTicks.push({
+                            angle: subAngle,
+                            price: subPrice,
+                            isMain: false
+                        });
+                    }
+                }
+            }
         }
     }
     
@@ -133,79 +171,128 @@ class AuctionClockVisualizer {
     
     /**
      * 开始动画
+     * 注意：动画更新完全基于WebSocket信号，不使用独立定时器
      */
     startAnimation() {
         if (this.isAnimating) return;
         
         this.isAnimating = true;
         
-        // 启动每秒刷新canvas的计时器
-        this.startCanvasRefresh();
+        // 不再启动独立的定时器，动画将完全基于WebSocket信号更新
+        // 移除startCanvasRefresh()和startHandAnimation()调用
         
-        // 启动指针动画计时器
-        this.startHandAnimation();
-        
-        // 启动平滑动画
-        this.animate();
+        // 绘制初始状态
+        this.drawClock();
     }
     
     /**
-     * 启动每秒刷新canvas的计时器
+     * 机械钟表式角度更新
+     * 实现1刻度->1刻度的离散跳跃
      */
-    startCanvasRefresh() {
-        // 停止之前的画布刷新定时器
-        if (this.canvasRefreshInterval) {
-            clearInterval(this.canvasRefreshInterval);
+    updateMechanicalAngle() {
+        const now = Date.now();
+        const timeDiff = now - this.lastUpdateTime;
+        
+        // 计算理想的目标角度（基于实际时间）
+        const targetAngle = this.calculateTargetAngle();
+        
+        // 计算当前应该达到的刻度位置
+        const currentTick = this.getCurrentTickPosition();
+        const targetTick = this.getTargetTickPosition(targetAngle);
+        
+        // 如果还没有达到下一个刻度位置，不进行跳跃
+        if (Math.abs(targetAngle - this.currentAngle) < this.getTickStepAngle()) {
+            return;
         }
         
-        // 启动新的画布刷新定时器
-        this.canvasRefreshInterval = setInterval(() => {
-            this.lastUpdateTime = Date.now();
-            this.drawClock();
-        }, 1000); // 每秒刷新一次画布
+        // 机械钟表式跳跃：每次跳跃一个刻度
+        this.performMechanicalJump();
+        
+        // 更新最后更新时间
+        this.lastUpdateTime = now;
     }
     
     /**
-     * 启动指针动画
+     * 计算目标角度
      */
-    startHandAnimation() {
-        // 停止之前的指针动画
-        if (this.handAnimationTimer) {
-            clearInterval(this.handAnimationTimer);
+    calculateTargetAngle() {
+        if (this.maxPrice <= this.minPrice) {
+            return 0;
         }
         
-        // 启动新的指针动画
-        this.handAnimationTimer = setInterval(() => {
-            // 更新角度
-            if (this.isAnimating && this.auction) {
-                // 计算时间差
-                const now = Date.now();
-                const timeDiff = now - this.lastUpdateTime;
-                
-                // 根据时间差计算应该增加的角度
-                const angleIncrement = (timeDiff / 1000) * (Math.PI * 2 * 0.95) / (this.decrementInterval * 60);
-                this.currentAngle += angleIncrement;
-                
-                // 限制最大角度
-                const maxAngle = Math.PI * 2 * 0.95;
-                if (this.currentAngle > maxAngle) {
-                    this.currentAngle = maxAngle;
-                }
-                
-                // 更新价格
-                this.updatePriceFromAngle();
-                
-                // 更新最后更新时间
-                this.lastUpdateTime = now;
-            }
+        const priceRange = this.maxPrice - this.minPrice;
+        const priceRatio = (this.maxPrice - this.currentPrice) / priceRange;
+        return priceRatio * Math.PI * 2 * 0.95;
+    }
+    
+    /**
+     * 获取当前刻度位置
+     */
+    getCurrentTickPosition() {
+        const tickStepAngle = this.getTickStepAngle();
+        return Math.round(this.currentAngle / tickStepAngle);
+    }
+    
+    /**
+     * 获取目标刻度位置
+     */
+    getTargetTickPosition(targetAngle) {
+        const tickStepAngle = this.getTickStepAngle();
+        return Math.round(targetAngle / tickStepAngle);
+    }
+    
+    /**
+     * 获取刻度步长角度
+     * 获取次刻度的步长角度（更精细的刻度）
+     */
+    getTickStepAngle() {
+        // 使用次刻度的数量计算步长，实现更精细的跳跃
+        const totalTicks = this.priceTicks.length * 5; // 每个主刻度之间有4个次刻度
+        return (Math.PI * 2 * 0.95) / totalTicks;
+    }
+    
+    /**
+     * 执行机械钟表式跳跃
+     */
+    performMechanicalJump() {
+        const targetAngle = this.calculateTargetAngle();
+        const currentTick = this.getCurrentTickPosition();
+        const targetTick = this.getTargetTickPosition(targetAngle);
+        
+        // 确定跳跃方向（通常是逆时针）
+        const direction = targetTick > currentTick ? 1 : -1;
+        
+        // 跳跃到下一个刻度
+        const tickStepAngle = this.getTickStepAngle();
+        this.currentAngle = (currentTick + direction) * tickStepAngle;
+        
+        // 添加机械感：轻微的回弹效果
+        this.addMechanicalBounce(direction);
+        
+        // 更新价格
+        this.updatePriceFromAngle();
+    }
+    
+    /**
+     * 添加机械钟表的回弹效果
+     */
+    addMechanicalBounce(direction) {
+        // 记录回弹前的角度
+        const preBounceAngle = this.currentAngle;
+        
+        // 轻微回弹（模拟机械钟表的齿轮咬合感）
+        setTimeout(() => {
+            this.currentAngle = preBounceAngle + (direction * this.getTickStepAngle() * 0.1);
             
-            // 绘制钟表
-            this.drawClock();
-        }, 50); // 每50ms更新一次指针位置
+            setTimeout(() => {
+                this.currentAngle = preBounceAngle;
+            }, 50);
+        }, 30);
     }
     
     /**
      * 停止动画
+     * 注意：动画更新完全基于WebSocket信号，不使用独立定时器
      */
     stopAnimation() {
         this.isAnimating = false;
@@ -232,6 +319,7 @@ class AuctionClockVisualizer {
     /**
      * 暂停动画
      * 保留当前状态，但停止动画更新
+     * 注意：动画更新完全基于WebSocket信号，不使用独立定时器
      */
     pauseAnimation() {
         // 标记动画为暂停状态
@@ -259,6 +347,7 @@ class AuctionClockVisualizer {
     /**
      * 恢复动画
      * 从暂停状态继续播放动画
+     * 注意：动画更新完全基于WebSocket信号，不使用独立定时器
      */
     resumeAnimation() {
         if (this.isAnimating || !this.auction) return;
@@ -266,14 +355,11 @@ class AuctionClockVisualizer {
         // 恢复动画状态
         this.isAnimating = true;
         
-        // 重新启动每秒刷新canvas的计时器
-        this.startCanvasRefresh();
+        // 不再启动独立的定时器，动画将完全基于WebSocket信号更新
+        // 移除startCanvasRefresh()和startHandAnimation()调用
         
-        // 重新启动指针动画计时器
-        this.startHandAnimation();
-        
-        // 重新启动平滑动画
-        this.animate();
+        // 绘制当前状态
+        this.drawClock();
     }
     
     /**
@@ -339,24 +425,34 @@ class AuctionClockVisualizer {
     
     /**
      * 绘制价格刻度
+     * 绘制主刻度和次刻度
      */
     drawPriceTicks() {
+        // 确保priceTicks和subTicks数组已初始化
+        if (!this.priceTicks) {
+            this.priceTicks = [];
+        }
+        if (!this.subTicks) {
+            this.subTicks = [];
+        }
+        
+        // 绘制主刻度
         this.priceTicks.forEach((tick, index) => {
-            // 计算刻度位置（逆时针方向）
+            // 计算主刻度位置（逆时针方向）
             const x1 = this.centerX + Math.cos(Math.PI * 1.5 + tick.angle) * (this.radius - 15);
             const y1 = this.centerY + Math.sin(Math.PI * 1.5 + tick.angle) * (this.radius - 15);
             const x2 = this.centerX + Math.cos(Math.PI * 1.5 + tick.angle) * (this.radius - 5);
             const y2 = this.centerY + Math.sin(Math.PI * 1.5 + tick.angle) * (this.radius - 5);
             
-            // 绘制刻度线
+            // 绘制主刻度线（更粗）
             this.ctx.beginPath();
             this.ctx.moveTo(x1, y1);
             this.ctx.lineTo(x2, y2);
-            this.ctx.strokeStyle = '#6b7280';
-            this.ctx.lineWidth = 1;
+            this.ctx.strokeStyle = '#374151';
+            this.ctx.lineWidth = 2;
             this.ctx.stroke();
             
-            // 绘制价格标签
+            // 绘制价格标签（仅主刻度有标签）
             this.ctx.save();
             this.ctx.fillStyle = '#374151';
             this.ctx.font = '9px Arial';
@@ -369,6 +465,23 @@ class AuctionClockVisualizer {
             
             this.ctx.fillText(tick.label, labelX, labelY);
             this.ctx.restore();
+        });
+        
+        // 绘制次刻度
+        this.subTicks.forEach((tick, index) => {
+            // 计算次刻度位置（逆时针方向）
+            const x1 = this.centerX + Math.cos(Math.PI * 1.5 + tick.angle) * (this.radius - 10);
+            const y1 = this.centerY + Math.sin(Math.PI * 1.5 + tick.angle) * (this.radius - 10);
+            const x2 = this.centerX + Math.cos(Math.PI * 1.5 + tick.angle) * (this.radius - 5);
+            const y2 = this.centerY + Math.sin(Math.PI * 1.5 + tick.angle) * (this.radius - 5);
+            
+            // 绘制次刻度线（更细，无标签）
+            this.ctx.beginPath();
+            this.ctx.moveTo(x1, y1);
+            this.ctx.lineTo(x2, y2);
+            this.ctx.strokeStyle = '#9ca3af';
+            this.ctx.lineWidth = 1;
+            this.ctx.stroke();
         });
     }
     
@@ -490,6 +603,7 @@ class AuctionClockVisualizer {
     /**
      * 更新价格
      * 注意：这里直接使用后端WebSocket发送的价格，而不是本地计算
+     * 动画更新完全基于WebSocket信号，不使用独立定时器
      * @param {number} newPrice - 新价格
      */
     updatePrice(newPrice) {
@@ -498,6 +612,29 @@ class AuctionClockVisualizer {
         
         // 根据新价格更新角度
         this.updateAngleFromPrice();
+        
+        // 立即更新动画显示，不依赖独立定时器
+        this.drawClock();
+    }
+    
+    /**
+     * 更新剩余时间
+     * @param {number} timeRemaining - 剩余时间（秒）
+     */
+    updateRemainingTime(timeRemaining) {
+        // 验证剩余时间是否有效
+        if (typeof timeRemaining !== 'number' || isNaN(timeRemaining) || timeRemaining < 0) {
+            console.warn(`无效的剩余时间数据: ${timeRemaining}`);
+            return;
+        }
+        
+        // 更新拍卖对象的剩余时间
+        if (this.auction) {
+            this.auction.timeRemaining = timeRemaining;
+        }
+        
+        // 可以在这里添加剩余时间显示的逻辑
+        // 例如在钟表上显示剩余时间
     }
     
     /**
@@ -516,6 +653,7 @@ class AuctionClockVisualizer {
         this.maxPrice = 0;
         this.priceDecrement = 0;
         this.priceTicks = [];
+        this.subTicks = []; // 重置次刻度数组
         this.lastUpdateTime = 0;
         
         // 重新绘制钟表
