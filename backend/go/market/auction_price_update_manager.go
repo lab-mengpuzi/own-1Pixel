@@ -9,6 +9,15 @@ import (
 	"own-1Pixel/backend/go/logger"
 )
 
+// 拍卖缓存项
+type AuctionCacheItem struct {
+	Auction      *Auction
+	LastUpdate   time.Time
+	NextUpdate   time.Time
+	LastPrice    float64
+	NeedsRefresh bool
+}
+
 // WebSocket价格更新管理器
 type AuctionPriceUpdateManager struct {
 	db               *sql.DB
@@ -17,6 +26,9 @@ type AuctionPriceUpdateManager struct {
 	mu               sync.Mutex
 	stopChan         chan bool
 	updateInterval   time.Duration
+	// 添加拍卖缓存
+	auctionCache     map[int]*AuctionCacheItem
+	cacheMutex       sync.RWMutex
 }
 
 // 创建新的价格更新管理器
@@ -26,7 +38,8 @@ func InitAuctionWSPriceUpdateManager(db *sql.DB, auctionWSManager *AuctionWSMana
 		auctionWSManager: auctionWSManager,
 		isRunning:        false,
 		stopChan:         make(chan bool),
-		updateInterval:   time.Second, // 每秒更新一次
+		updateInterval:   time.Second, // 基础更新间隔，实际会根据拍卖配置调整
+		auctionCache:     make(map[int]*AuctionCacheItem),
 	}
 }
 
@@ -134,13 +147,18 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctio
 		auctions = append(auctions, auction)
 	}
 
-	// 更新每个活跃拍卖的价格
+	// 更新缓存中的拍卖信息
+	auctionWSPriceUpdateManager.updateAuctionCache(auctions)
+
+	// 只更新需要更新的拍卖价格
 	for _, auction := range auctions {
-		// 在事务内更新价格
-		err = auctionWSPriceUpdateManager.updateAuctionPrice(tx, auction)
-		if err != nil {
-			logger.Info("auction_price_update_manager", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
-			continue
+		if auctionWSPriceUpdateManager.shouldUpdateAuctionPrice(auction) {
+			// 在事务内更新价格
+			err = auctionWSPriceUpdateManager.updateAuctionPrice(tx, auction)
+			if err != nil {
+				logger.Info("auction_price_update_manager", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
+				continue
+			}
 		}
 	}
 
@@ -148,6 +166,69 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctio
 	if len(auctions) == 0 {
 		auctionWSPriceUpdateManager.StopAuctionWSPriceUpdateManager()
 	}
+}
+
+// 更新拍卖缓存
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionCache(auctions []Auction) {
+	auctionWSPriceUpdateManager.cacheMutex.Lock()
+	defer auctionWSPriceUpdateManager.cacheMutex.Unlock()
+
+	now := time.Now()
+	
+	// 创建当前活跃拍卖ID的映射
+	activeAuctionIDs := make(map[int]bool)
+	for _, auction := range auctions {
+		activeAuctionIDs[auction.ID] = true
+		
+		// 如果拍卖不在缓存中，添加到缓存
+		if _, exists := auctionWSPriceUpdateManager.auctionCache[auction.ID]; !exists {
+			auctionWSPriceUpdateManager.auctionCache[auction.ID] = &AuctionCacheItem{
+				Auction:      &auction,
+				LastUpdate:   now,
+				NextUpdate:   now,
+				LastPrice:    auction.CurrentPrice,
+				NeedsRefresh: true,
+			}
+		} else {
+			// 更新缓存中的拍卖信息
+			cacheItem := auctionWSPriceUpdateManager.auctionCache[auction.ID]
+			cacheItem.Auction = &auction
+			cacheItem.LastUpdate = now
+		}
+	}
+	
+	// 移除不再活跃的拍卖缓存
+	for id := range auctionWSPriceUpdateManager.auctionCache {
+		if !activeAuctionIDs[id] {
+			delete(auctionWSPriceUpdateManager.auctionCache, id)
+		}
+	}
+}
+
+// 判断是否应该更新拍卖价格
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) shouldUpdateAuctionPrice(auction Auction) bool {
+	auctionWSPriceUpdateManager.cacheMutex.RLock()
+	defer auctionWSPriceUpdateManager.cacheMutex.RUnlock()
+	
+	now := time.Now()
+	
+	// 如果拍卖不在缓存中，需要更新
+	cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auction.ID]
+	if !exists {
+		return true
+	}
+	
+	// 如果到了下次更新时间，需要更新
+	if now.After(cacheItem.NextUpdate) {
+		return true
+	}
+	
+	// 如果价格发生了变化，需要更新
+	if cacheItem.LastPrice != auction.CurrentPrice {
+		return true
+	}
+	
+	return false
 }
 
 // 在事务内更新单个拍卖的价格
@@ -160,8 +241,8 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 	elapsedTime := time.Since(*auction.StartTime)
 	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
 
-	// 实现逐刻度递减：每次递减1个单位
-	totalDecrement := float64(intervalsPassed) * 1.0
+	// 使用拍卖自身配置的价格递减量，而不是硬编码的1.0
+	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
 
 	// 计算新的当前价格
 	newPrice := auction.InitialPrice - totalDecrement
@@ -180,21 +261,24 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 			return err
 		}
 
-		// 获取更新后的拍卖信息
-		updatedAuction, err := GetAuctionID(auctionWSPriceUpdateManager.db, auction.ID)
-		if err != nil {
-			return err
-		}
+		// 更新缓存中的拍卖信息
+		auctionWSPriceUpdateManager.updateCacheAfterPriceUpdate(auction.ID, newPrice, true)
+
+		// 创建更新后的拍卖对象，避免再次查询数据库
+		updatedAuction := auction
+		updatedAuction.CurrentPrice = newPrice
+		updatedAuction.Status = "completed"
 
 		// 广播拍卖更新
-		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(updatedAuction, "completed")
+		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(&updatedAuction, "completed")
 
 		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 已达到最低价格，拍卖结束\n", auction.ID))
 		return nil
 	}
 
-	// 如果价格有变化，则更新数据库
-	if newPrice != auction.CurrentPrice {
+	// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
+	// 添加价格变化方向检查，防止价格波动
+	if newPrice != auction.CurrentPrice && newPrice < auction.CurrentPrice {
 		oldPrice := auction.CurrentPrice
 		_, err := tx.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
@@ -202,25 +286,72 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 			return err
 		}
 
-		// 获取更新后的拍卖信息
-		updatedAuction, err := GetAuctionID(auctionWSPriceUpdateManager.db, auction.ID)
-		if err != nil {
-			return err
-		}
+		// 更新缓存中的拍卖信息
+		auctionWSPriceUpdateManager.updateCacheAfterPriceUpdate(auction.ID, newPrice, false)
+
+		// 创建更新后的拍卖对象，避免再次查询数据库
+		updatedAuction := auction
+		updatedAuction.CurrentPrice = newPrice
 
 		// 计算剩余时间
-		timeRemaining := auctionWSPriceUpdateManager.calculateTimeRemaining(updatedAuction)
+		timeRemaining := auctionWSPriceUpdateManager.calculateTimeRemaining(&updatedAuction)
 
 		// 广播价格更新
 		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSPriceUpdate(auction.ID, oldPrice, newPrice, timeRemaining)
 
 		// 广播拍卖更新
-		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(updatedAuction, "auction_price_updated")
+		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(&updatedAuction, "auction_price_updated")
 
 		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, oldPrice, newPrice))
+	} else if newPrice >= auction.CurrentPrice {
+		// 记录价格异常上涨或不变的情况
+		logger.Info("auction_price_update_manager", fmt.Sprintf("价格更新异常：计算价格 %.2f 不低于当前价格 %.2f，跳过更新\n", newPrice, auction.CurrentPrice))
+		
+		// 即使价格没有更新，也要更新缓存中的下次更新时间
+		auctionWSPriceUpdateManager.updateCacheNextUpdateTime(auction.ID)
 	}
 
 	return nil
+}
+
+// 更新价格后的缓存更新
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateCacheAfterPriceUpdate(auctionID int, newPrice float64, isCompleted bool) {
+	auctionWSPriceUpdateManager.cacheMutex.Lock()
+	defer auctionWSPriceUpdateManager.cacheMutex.Unlock()
+	
+	if cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; exists {
+		cacheItem.LastPrice = newPrice
+		cacheItem.LastUpdate = time.Now()
+		
+		// 如果拍卖已完成，设置下次更新时间为很久以后
+		if isCompleted {
+			cacheItem.NextUpdate = time.Now().Add(24 * time.Hour)
+		} else {
+			// 根据拍卖的递减间隔设置下次更新时间
+			if cacheItem.Auction != nil {
+				cacheItem.NextUpdate = time.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
+			} else {
+				// 默认1秒后更新
+				cacheItem.NextUpdate = time.Now().Add(time.Second)
+			}
+		}
+	}
+}
+
+// 更新缓存中的下次更新时间
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateCacheNextUpdateTime(auctionID int) {
+	auctionWSPriceUpdateManager.cacheMutex.Lock()
+	defer auctionWSPriceUpdateManager.cacheMutex.Unlock()
+	
+	if cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; exists {
+		// 根据拍卖的递减间隔设置下次更新时间
+		if cacheItem.Auction != nil {
+			cacheItem.NextUpdate = time.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
+		} else {
+			// 默认1秒后更新
+			cacheItem.NextUpdate = time.Now().Add(time.Second)
+		}
+	}
 }
 
 // 计算拍卖剩余时间（秒）

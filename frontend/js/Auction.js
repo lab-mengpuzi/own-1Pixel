@@ -81,62 +81,114 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log(`收到价格更新: 拍卖ID ${auctionId}, 价格 ${oldPrice} -> ${newPrice}, 剩余时间 ${timeRemaining}秒`);
 
-        // 获取拍卖数据用于验证
-        fetch('/api/auction/get', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                auction_id: parseInt(auctionId)
+        // 验证价格单调递减（第一层防护）
+        if (oldPrice && newPrice && newPrice > oldPrice) {
+            console.error(`价格验证失败: 新价格 (${newPrice}) 高于旧价格 (${oldPrice})，荷兰钟拍卖价格不应上涨`);
+            return;
+        }
+
+        // 获取当前显示的价格，用于本地验证
+        const buyerPriceElement = document.querySelector(`#auctionsList [data-auction-id="${auctionId}"] .price-countdown`);
+        const sellerPriceElement = document.querySelector(`#sellerAuctionsList [data-auction-id="${auctionId}"] .price-countdown`);
+        const currentDisplayPrice = buyerPriceElement ? parseFloat(buyerPriceElement.textContent.replace(/[^\d.]/g, '')) : 
+                                    (sellerPriceElement ? parseFloat(sellerPriceElement.textContent.replace(/[^\d.]/g, '')) : null);
+
+        // 本地价格验证：检查价格变化方向是否正确（荷兰钟拍卖价格应该只递减）
+        if (currentDisplayPrice !== null && !isNaN(currentDisplayPrice)) {
+            if (newPrice > currentDisplayPrice) {
+                console.error(`本地价格验证失败: 新价格 (${newPrice}) 高于当前显示价格 (${currentDisplayPrice})，荷兰钟拍卖价格不应上涨`);
+                return;
+            }
+            
+            // 验证价格变化幅度是否合理（防止异常跳变）
+            const priceDifference = Math.abs(newPrice - currentDisplayPrice);
+            const maxReasonableChange = currentDisplayPrice * 0.5; // 允许最大50%的变化
+            
+            if (priceDifference > maxReasonableChange && currentDisplayPrice > 0) {
+                console.error(`本地价格验证失败: 价格变化幅度过大 (${currentDisplayPrice} -> ${newPrice})，可能是异常波动`);
+                return;
+            }
+        }
+
+        // 防抖机制：如果最近已经更新过这个拍卖的价格，延迟更新
+        if (window.priceUpdateDebounce && window.priceUpdateDebounce[auctionId]) {
+            clearTimeout(window.priceUpdateDebounce[auctionId]);
+        }
+        
+        // 初始化防抖对象
+        if (!window.priceUpdateDebounce) {
+            window.priceUpdateDebounce = {};
+        }
+        
+        // 设置防抖延迟（200毫秒）
+        window.priceUpdateDebounce[auctionId] = setTimeout(() => {
+            // 获取拍卖数据用于服务器端验证
+            fetch('/api/auction/get', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    auction_id: parseInt(auctionId)
+                })
             })
-        })
-            .then(response => response.json())
-            .then(result => {
-                if (result.auction) {
-                    const auction = result.auction;
+                .then(response => response.json())
+                .then(result => {
+                    if (result.auction) {
+                        const auction = result.auction;
 
-                    // 验证价格是否合理
-                    if (!validateAuctionPrice(auction, newPrice)) {
-                        console.error(`价格验证失败，拒绝更新价格: 拍卖ID ${auctionId}, 价格 ${newPrice}`);
-                        return;
-                    }
+                        // 服务器端价格验证
+                        if (!validateAuctionPrice(auction, newPrice)) {
+                            console.error(`服务器价格验证失败，拒绝更新价格: 拍卖ID ${auctionId}, 价格 ${newPrice}`);
+                            return;
+                        }
 
-                    // 验证剩余时间是否合理
-                    if (!validateAuctionTimeRemaining(auction, timeRemaining)) {
-                        console.error(`时间验证失败，拒绝更新时间: 拍卖ID ${auctionId}, 时间 ${timeRemaining}`);
-                        return;
-                    }
+                        // 验证剩余时间是否合理
+                        if (!validateAuctionTimeRemaining(auction, timeRemaining)) {
+                            console.error(`时间验证失败，拒绝更新时间: 拍卖ID ${auctionId}, 时间 ${timeRemaining}`);
+                            return;
+                        }
 
-                    // 验证通过，更新价格显示
-                    updateAuctionPrice(auctionId, 'buyer', newPrice);
-                    updateAuctionPrice(auctionId, 'seller', newPrice);
+                        // 验证通过，更新价格显示
+                        updateAuctionPrice(auctionId, 'buyer', newPrice);
+                        updateAuctionPrice(auctionId, 'seller', newPrice);
 
-                    // 更新拍卖卡片内的可视化器
-                    if (window.auctionVisualizers && window.auctionVisualizers[auctionId]) {
-                        try {
-                            const visualizer = window.auctionVisualizers[auctionId];
-                            visualizer.updatePrice(newPrice);
-                            visualizer.updateRemainingTime(timeRemaining);
-                        } catch (error) {
-                            console.error(`更新拍卖 ${auctionId} 的可视化器价格失败:`, error);
+                        // 更新拍卖卡片内的可视化器
+                        if (window.auctionVisualizers && window.auctionVisualizers[auctionId]) {
+                            try {
+                                const visualizer = window.auctionVisualizers[auctionId];
+                                visualizer.updatePrice(newPrice);
+                                visualizer.updateRemainingTime(timeRemaining);
+                            } catch (error) {
+                                console.error(`更新拍卖 ${auctionId} 的可视化器价格失败:`, error);
+                            }
+                        }
+
+                        // 如果价格已达到最低价，停止相关定时器
+                        // 注意：这里不直接结束拍卖，因为后端会发送拍卖状态更新消息
+                        if (timeRemaining <= 0) {
+                            console.log(`拍卖 ${auctionId} 已达到最低价，等待后端处理拍卖结束`);
                         }
                     }
-
-                    // 如果价格已达到最低价，停止相关定时器
-                    // 注意：这里不直接结束拍卖，因为后端会发送拍卖状态更新消息
-                    if (timeRemaining <= 0) {
-                        console.log(`拍卖 ${auctionId} 已达到最低价，等待后端处理拍卖结束`);
+                })
+                .catch(error => {
+                    console.error('获取拍卖数据失败:', error);
+                    // 如果获取数据失败，仍然进行本地验证后再更新价格显示
+                    if (currentDisplayPrice !== null && !isNaN(currentDisplayPrice)) {
+                        // 本地验证通过，更新价格
+                        updateAuctionPrice(auctionId, 'buyer', newPrice);
+                        updateAuctionPrice(auctionId, 'seller', newPrice);
+                    } else {
+                        console.warn('无法验证价格，不更新显示');
                     }
-                }
-            })
-            .catch(error => {
-                console.error('获取拍卖数据失败:', error);
-                // 如果获取数据失败，仍然更新价格显示，但记录警告
-                console.warn('无法验证价格，但仍更新显示');
-                updateAuctionPrice(auctionId, 'buyer', newPrice);
-                updateAuctionPrice(auctionId, 'seller', newPrice);
-            });
+                })
+                .finally(() => {
+                    // 清除防抖定时器引用
+                    if (window.priceUpdateDebounce && window.priceUpdateDebounce[auctionId]) {
+                        delete window.priceUpdateDebounce[auctionId];
+                    }
+                });
+        }, 200); // 200毫秒防抖延迟
     }
 
     // 处理拍卖状态更新
@@ -973,44 +1025,6 @@ function startAuctionPriceDecrementTimer(auction) {
     if (window.priceTimers[auction.id]) {
         clearInterval(window.priceTimers[auction.id]);
     }
-
-    // 如果拍卖不是活跃状态，不启动定时器
-    if (auction.status !== 'active') {
-        return;
-    }
-
-    // 创建新的定时器
-    window.priceTimers[auction.id] = setInterval(() => {
-        // 获取最新的拍卖数据
-        fetch('/api/auction/get', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                auction_id: auction.id
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.auction) {
-                const updatedAuction = data.auction;
-                
-                // 更新价格显示
-                updateAuctionPrice(auction.id, 'buyer', updatedAuction.currentPrice);
-                updateAuctionPrice(auction.id, 'seller', updatedAuction.currentPrice);
-                
-                // 如果拍卖已结束，清除定时器
-                if (updatedAuction.status !== 'active') {
-                    clearInterval(window.priceTimers[auction.id]);
-                    delete window.priceTimers[auction.id];
-                }
-            }
-        })
-        .catch(error => {
-            console.error('获取拍卖数据失败:', error);
-        });
-    }, (auction.decrementInterval || 1) * 1000); // 使用拍卖的递减间隔，默认1秒
 }
 
 // 计算剩余时间
@@ -1583,6 +1597,12 @@ function validateAuctionPrice(auction, newPrice) {
         return false;
     }
 
+    // 检查价格是否为非负数
+    if (newPrice < 0) {
+        console.error(`价格验证失败: 价格不能为负数 (${newPrice})`);
+        return false;
+    }
+
     // 检查价格是否在合理范围内
     const minPrice = auction.minPrice || auction.min_price || 0;
     const maxPrice = auction.initialPrice || auction.initial_price || auction.startPrice || 0;
@@ -1595,7 +1615,16 @@ function validateAuctionPrice(auction, newPrice) {
     // 检查价格变化是否合理（价格应该递减）
     const currentPrice = auction.currentPrice || auction.current_price || maxPrice;
     if (newPrice > currentPrice) {
-        console.warn(`价格验证警告：价格 ${newPrice} 高于当前价格 ${currentPrice}`);
+        console.error(`价格验证失败: 新价格 (${newPrice}) 高于当前价格 (${currentPrice})，荷兰钟拍卖价格不应上涨`);
+        return false;
+    }
+    
+    // 验证价格变化幅度是否合理（防止异常跳变）
+    const priceDifference = Math.abs(newPrice - currentPrice);
+    const maxReasonableChange = currentPrice * 0.5; // 允许最大50%的变化
+    
+    if (priceDifference > maxReasonableChange && currentPrice > 0) {
+        console.error(`价格验证失败: 价格变化幅度过大 (${currentPrice} -> ${newPrice})，可能是异常波动`);
         return false;
     }
 

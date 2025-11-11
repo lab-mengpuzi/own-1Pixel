@@ -219,7 +219,7 @@ func (auctionWSManager *AuctionWSManager) sendActiveAuctions(conn *websocket.Con
 
 	// 记录发送时间差
 	sendDuration := time.Since(startTime)
-	logger.Info("websocket", fmt.Sprintf("发送拍卖列表耗时: %v\n", sendDuration))
+	logger.Info("websocket", fmt.Sprintf("发送拍卖列表耗时: %s\n", FormatDuration(sendDuration)))
 }
 
 // 发送特定拍卖详情
@@ -247,7 +247,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionDetails(conn *websocket.Con
 
 	// 记录发送时间差
 	sendDuration := time.Since(startTime)
-	logger.Info("websocket", fmt.Sprintf("发送拍卖详情耗时: %v\n", sendDuration))
+	logger.Info("websocket", fmt.Sprintf("发送拍卖详情耗时: %s\n", FormatDuration(sendDuration)))
 }
 
 // 处理竞价请求
@@ -316,7 +316,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionWSBidResult(conn *websocket
 
 	// 记录发送时间差
 	sendDuration := time.Since(startTime)
-	logger.Info("websocket", fmt.Sprintf("发送竞价结果耗时: %v\n", sendDuration))
+	logger.Info("websocket", fmt.Sprintf("发送竞价结果耗时: %s\n", FormatDuration(sendDuration)))
 }
 
 // 广播拍卖更新
@@ -364,17 +364,17 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 		sendDuration := time.Since(sendStartTime)
 
 		if err != nil {
-			logger.Info("websocket", fmt.Sprintf("广播拍卖更新失败: %v, 发送耗时: %v\n", err, sendDuration))
+			logger.Info("websocket", fmt.Sprintf("广播拍卖更新失败: %v, 发送耗时: %s\n", err, FormatDuration(sendDuration)))
 			failedConnections = append(failedConnections, conn)
 		} else {
 			successCount++
-			logger.Info("websocket", fmt.Sprintf("广播拍卖更新成功, 发送耗时: %v\n", sendDuration))
+			logger.Info("websocket", fmt.Sprintf("广播拍卖更新成功, 发送耗时: %s\n", FormatDuration(sendDuration)))
 		}
 	}
 
 	// 记录总广播时间
 	totalBroadcastDuration := time.Since(broadcastStartTime)
-	logger.Info("websocket", fmt.Sprintf("广播拍卖更新总耗时: %v, 成功: %d, 失败: %d\n", totalBroadcastDuration, successCount, len(failedConnections)))
+	logger.Info("websocket", fmt.Sprintf("广播拍卖更新总耗时: %s, 成功: %d, 失败: %d\n", FormatDuration(totalBroadcastDuration), successCount, len(failedConnections)))
 
 	// 移除失败的连接
 	for _, conn := range failedConnections {
@@ -432,17 +432,17 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 		sendDuration := time.Since(sendStartTime)
 
 		if err != nil {
-			logger.Info("websocket", fmt.Sprintf("广播价格更新失败: %v, 发送耗时: %v\n", err, sendDuration))
+			logger.Info("websocket", fmt.Sprintf("广播价格更新失败: %v, 发送耗时: %s\n", err, FormatDuration(sendDuration)))
 			failedConnections = append(failedConnections, conn)
 		} else {
 			successCount++
-			logger.Info("websocket", fmt.Sprintf("广播价格更新成功, 发送耗时: %v\n", sendDuration))
+			logger.Info("websocket", fmt.Sprintf("广播价格更新成功, 发送耗时: %s\n", FormatDuration(sendDuration)))
 		}
 	}
 
 	// 记录总广播时间
 	totalBroadcastDuration := time.Since(broadcastStartTime)
-	logger.Info("websocket", fmt.Sprintf("广播价格更新总耗时: %v, 成功: %d, 失败: %d\n", totalBroadcastDuration, successCount, len(failedConnections)))
+	logger.Info("websocket", fmt.Sprintf("广播价格更新总耗时: %s, 成功: %d, 失败: %d\n", FormatDuration(totalBroadcastDuration), successCount, len(failedConnections)))
 
 	// 移除失败的连接
 	for _, conn := range failedConnections {
@@ -458,4 +458,25 @@ func (auctionWSManager *AuctionWSManager) GetAuctionWSConnectionCount() int {
 	auctionWSManager.mu.Lock()
 	defer auctionWSManager.mu.Unlock()
 	return len(auctionWSManager.connections)
+}
+
+// FormatDuration 格式化时间间隔，自动选择合适的单位
+// 当时间间隔小于1秒时，显示为毫秒
+// 当时间间隔小于1毫秒时，显示为微秒
+func FormatDuration(d time.Duration) string {
+	// 转换为浮点数秒，便于比较
+	seconds := d.Seconds()
+	milliseconds := d.Milliseconds()
+	microseconds := d.Microseconds()
+
+	// 如果小于1毫秒，使用微秒
+	if milliseconds == 0 {
+		return fmt.Sprintf("%.4fμs", float64(microseconds))
+	}
+	// 如果小于1秒，使用毫秒
+	if seconds < 1 {
+		return fmt.Sprintf("%.4fms", float64(milliseconds))
+	}
+	// 否则使用秒
+	return fmt.Sprintf("%.4fs", seconds)
 }
