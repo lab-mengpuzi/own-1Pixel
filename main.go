@@ -273,6 +273,45 @@ func getSellerAuctions(w http.ResponseWriter, r *http.Request) {
 	market.GetSellerAuctions(db, w, r)
 }
 
+// 重新激活荷兰钟拍卖
+func reactivateAuction(w http.ResponseWriter, r *http.Request) {
+	market.ReactivateAuction(db, w, r)
+}
+
+// 恢复进行中的拍卖
+func recoverActiveAuctions() {
+	logger.Info("main", "检查并恢复进行中的拍卖...\n")
+
+	// 获取所有活跃拍卖
+	activeAuctions, err := market.GetActiveAuctions(db)
+	if err != nil {
+		logger.Info("main", fmt.Sprintf("获取活跃拍卖失败: %v\n", err))
+		return
+	}
+
+	if len(activeAuctions) == 0 {
+		logger.Info("main", "没有进行中的拍卖需要恢复\n")
+		return
+	}
+
+	logger.Info("main", fmt.Sprintf("发现 %d 个进行中的拍卖，开始恢复...\n", len(activeAuctions)))
+
+	// 启动价格更新管理器
+	if auctionPriceUpdateManager != nil {
+		auctionPriceUpdateManager.StartAuctionWSPriceUpdateManager()
+		logger.Info("main", "价格更新管理器已启动，将自动更新活跃拍卖价格\n")
+	}
+
+	// 为每个活跃拍卖恢复价格更新缓存
+	for _, auction := range activeAuctions {
+		if auctionPriceUpdateManager != nil {
+			// 将活跃拍卖添加到价格更新缓存
+			auctionPriceUpdateManager.UpdateAuctionPriceCache(auction.ID, auction.CurrentPrice)
+			logger.Info("main", fmt.Sprintf("已恢复拍卖 ID: %d, 当前价格: %.2f\n", auction.ID, auction.CurrentPrice))
+		}
+	}
+}
+
 func main() {
 	var err error
 
@@ -308,6 +347,9 @@ func main() {
 
 	// 初始化价格更新管理器
 	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
+
+	// 检查并恢复进行中的拍卖
+	recoverActiveAuctions()
 
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
@@ -363,6 +405,7 @@ func main() {
 	http.HandleFunc("/api/auction/bid", CommitAuctionBid)
 	http.HandleFunc("/api/auction/cancel", cancelAuction)
 	http.HandleFunc("/api/auction/pause", pauseAuction)
+	http.HandleFunc("/api/auction/reactivate", reactivateAuction)
 
 	// WebSocket端点
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)

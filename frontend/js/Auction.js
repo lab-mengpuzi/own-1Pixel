@@ -548,11 +548,11 @@ function createSellerAuctionCard(auction) {
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">¥${(auction.minPrice || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.minPrice || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">¥${(auction.priceDecrement || 0).toFixed(2)}</span>
+                    <span class="font-medium">¥ ${(auction.priceDecrement || 0).toFixed(2)}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-gray-600">递减间隔:</span>
@@ -578,6 +578,11 @@ function createSellerAuctionCard(auction) {
             `<div class="w-full text-center text-gray-500 py-2">
                         拍卖已结束
                     </div>` : ''}
+                ${auction.status === 'completed' || auction.status === 'cancelled' ?
+            `<button class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition" 
+                        onclick="reactivateAuction(${auction.id})">
+                        重新激活
+                    </button>` : ''}
             </div>
         </div>
     `;
@@ -1142,75 +1147,6 @@ async function loadSellerAuctions() {
     }
 }
 
-// 创建卖家拍卖卡片
-function createSellerAuctionCard(auction) {
-    const card = document.createElement('div');
-    card.className = 'auction-card bg-white rounded-lg shadow-md overflow-hidden border border-gray-200';
-    card.id = `seller-auction-${auction.id}`;
-
-    const statusClass = auction.status === 'active' ? 'bg-green-100 text-green-800' :
-        auction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-            auction.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                'bg-gray-100 text-gray-800';
-
-    const statusText = auction.status === 'active' ? '进行中' :
-        auction.status === 'pending' ? '待开始' :
-            auction.status === 'completed' ? '已完成' : '已取消';
-
-    card.innerHTML = `
-        <div class="p-4">
-            <div class="flex justify-between items-start mb-2">
-                <h3 class="text-lg font-semibold">${auction.itemType === 'apple' ? '苹果' : '木材'}</h3>
-                <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
-            </div>
-            <div class="space-y-2">
-                <div class="flex justify-between">
-                    <span class="text-gray-600">数量:</span>
-                    <span class="font-medium">${auction.quantity}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">当前价格:</span>
-                    <span class="price-countdown font-bold text-lg text-indigo-600">¥ ${(auction.currentPrice || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">最低价格:</span>
-                    <span class="font-medium">¥ ${(auction.minPrice || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">递减价格:</span>
-                    <span class="font-medium">¥ ${(auction.priceDecrement || 0).toFixed(2)}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="text-gray-600">递减间隔:</span>
-                    <span class="font-medium">${auction.decrementInterval}秒</span>
-                </div>
-            </div>
-            <div class="mt-4 flex flex-col space-y-2">
-                ${auction.status === 'pending' ?
-            `<button class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition" 
-                            onclick="startAuction(${auction.id})">
-                        上架拍卖
-                    </button>
-                    <button class="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition" 
-                            onclick="cancelAuction(${auction.id})">
-                        取消拍卖
-                    </button>` : ''}
-                ${auction.status === 'active' ?
-            `<button class="w-full bg-yellow-600 text-white py-2 px-4 rounded-md hover:bg-yellow-700 transition" 
-                            onclick="pauseAuction(${auction.id})">
-                        下架拍卖
-                    </button>` : ''}
-                ${auction.status === 'completed' || auction.status === 'cancelled' ?
-            `<div class="w-full text-center text-gray-500 py-2">
-                        拍卖已结束
-                    </div>` : ''}
-            </div>
-        </div>
-    `;
-
-    return card;
-}
-
 // 加载拍卖列表
 async function loadAuctions() {
     try {
@@ -1424,61 +1360,10 @@ function openAuctionBidModal(auctionId, itemType, currentPrice, minPrice, quanti
     bidModal.classList.remove('hidden');
 }
 
-// 提交竞价
-async function handleAuctionBid() {
-    const bidModal = document.getElementById('bidModal');
-
-    // 检查元素是否存在
-    if (!bidModal) {
-        console.error('竞价模态框元素未找到');
-        return;
-    }
-
-    const auctionId = parseInt(bidModal.dataset.auctionId);
-    const bidAmount = parseInt(document.getElementById('bidAmount').value);
-
+// 重新激活拍卖
+async function reactivateAuction(auctionId) {
     try {
-        const response = await fetch('/api/auction/bid', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                auction_id: auctionId,
-                bid_amount: bidAmount
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showNotification('竞价成功');
-            bidModal.classList.add('hidden');
-
-            // 使用统一定时器管理系统清除所有相关定时器
-            if (window.timerManager) {
-                // 清除卖家区域的价格递减定时器
-                window.timerManager.stopSellerPriceDecrementTimer(auctionId);
-                // 清除买家区域的价格递减定时器
-                window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-            }
-
-            loadBalance();
-            loadAuctions();
-            loadSellerAuctions();
-        } else {
-            showNotification(data.message || '竞价失败', 'error');
-        }
-    } catch (error) {
-        console.error('竞价失败:', error);
-        showNotification('竞价失败', 'error');
-    }
-}
-
-// 结束拍卖
-async function endAuction(auctionId) {
-    try {
-        const response = await fetch('/api/auction/end', {
+        const response = await fetch('/api/auction/reactivate', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1491,25 +1376,17 @@ async function endAuction(auctionId) {
         const data = await response.json();
 
         if (data.success) {
-            showNotification('拍卖已结束');
-
-            // 使用统一定时器管理系统清除所有相关定时器
-            if (window.timerManager) {
-                // 清除卖家区域的价格递减定时器
-                window.timerManager.stopSellerPriceDecrementTimer(auctionId);
-                // 清除买家区域的价格递减定时器
-                window.timerManager.stopBuyerPriceDecrementTimer(auctionId);
-            }
+            showNotification('拍卖已重新激活');
 
             // 刷新拍卖列表
             loadAuctions();
             loadSellerAuctions();
         } else {
-            showNotification(data.message || '结束拍卖失败', 'error');
+            showNotification(data.message || '重新激活拍卖失败', 'error');
         }
     } catch (error) {
-        console.error('结束拍卖失败:', error);
-        showNotification('结束拍卖失败', 'error');
+        console.error('重新激活拍卖失败:', error);
+        showNotification('重新激活拍卖失败', 'error');
     }
 }
 
