@@ -189,16 +189,40 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 		newPrice = auction.MinPrice
 	}
 
-	// 如果价格已经达到最低价格，则结束拍卖
+	// 如果价格已经达到最低价格，则取消拍卖并退还物品
 	if newPrice <= auction.MinPrice {
-		// 更新拍卖状态为已完成
-		_, err := db.Exec("UPDATE auctions SET status = 'completed', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		// 开始事务
+		tx, err := db.Begin()
+		if err != nil {
+			logger.Info("auction", fmt.Sprintf("开始事务失败: %v\n", err))
+			return
+		}
+
+		// 更新拍卖状态为已取消
+		_, err = tx.Exec("UPDATE auctions SET status = 'cancelled', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
 		if err != nil {
 			logger.Info("auction", fmt.Sprintf("更新拍卖状态失败: %v\n", err))
+			tx.Rollback()
 			return
 		}
-		logger.Info("auction", fmt.Sprintf("拍卖ID %d 已达到最低价格，拍卖结束\n", auction.ID))
+
+		// 退还物品至背包
+		err = UnlockBackpackItems(tx, auction.ItemType, auction.Quantity)
+		if err != nil {
+			logger.Info("auction", fmt.Sprintf("退还物品至背包失败: %v\n", err))
+			tx.Rollback()
+			return
+		}
+
+		// 提交事务
+		err = tx.Commit()
+		if err != nil {
+			logger.Info("auction", fmt.Sprintf("提交事务失败: %v\n", err))
+			return
+		}
+
+		logger.Info("auction", fmt.Sprintf("拍卖ID %d 已达到最低价格但无人竞价，拍卖已取消并退还物品\n", auction.ID))
 
 		// 检查是否还有其他活跃的拍卖，如果没有则停止定时器
 		var activeAuctionCount int
@@ -1927,4 +1951,152 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 		auctionID, userID, price, quantity, bidID))
 
 	return true, "竞价成功", nil
+}
+
+// 重新激活拍卖 - 允许卖家将已完成、已取消的拍卖状态更新为pending
+func ReactivateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	logger.Info("auction", "重新激活拍卖请求\n")
+
+	// 统一设置响应头
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != "POST" {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖失败，不支持的请求方法: %s\n", r.Method))
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "不支持的请求方法",
+		})
+		return
+	}
+
+	// 解析请求数据
+	var data struct {
+		AuctionID int `json:"auction_id"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&data)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，解析JSON失败: %v\n", err))
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "请求数据解析失败",
+		})
+		return
+	}
+
+	// 验证输入
+	if data.AuctionID <= 0 {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖失败，拍卖ID %d 无效\n", data.AuctionID))
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "拍卖ID无效",
+		})
+		return
+	}
+
+	// 开始事务
+	tx, err := db.Begin()
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，事务开始失败: %v\n", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "事务开始失败",
+		})
+		return
+	}
+
+	// 检查拍卖是否存在
+	var auction Auction
+	var startTime, endTime sql.NullTime
+	err = tx.QueryRow(`
+		SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
+		decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at 
+		FROM auctions WHERE id = ?`, data.AuctionID).Scan(
+		&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
+		&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
+		&auction.Quantity, &startTime, &endTime, &auction.Status,
+		&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，获取拍卖信息失败: %v\n", err))
+		if err == sql.ErrNoRows {
+			logger.Info("auction", fmt.Sprintf("重新激活拍卖失败，拍卖ID %d 不存在\n", data.AuctionID))
+			tx.Rollback()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "拍卖不存在",
+			})
+		} else {
+			tx.Rollback()
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "数据库查询失败",
+			})
+		}
+		return
+	}
+
+	// 检查拍卖状态，只允许重新激活已完成或已取消的拍卖
+	if auction.Status != "completed" && auction.Status != "cancelled" {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖失败，拍卖ID %d 状态为 %s，不允许重新激活\n", data.AuctionID, auction.Status))
+		tx.Rollback()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "只能重新激活已完成或已取消的拍卖",
+		})
+		return
+	}
+
+	// 检查背包中是否有足够的物品
+	err = LockBackpackItems(tx, auction.ItemType, auction.Quantity)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，锁定背包物品失败: %v\n", err))
+		tx.Rollback()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// 重置拍卖状态为pending，并重置当前价格为初始价格
+	_, err = tx.Exec(`
+		UPDATE auctions 
+		SET status = 'pending', current_price = initial_price, start_time = NULL, end_time = NULL, winner_id = NULL, updated_at = CURRENT_TIMESTAMP 
+		WHERE id = ?`, data.AuctionID)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，更新拍卖状态失败: %v\n", err))
+		tx.Rollback()
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "更新拍卖状态失败",
+		})
+		return
+	}
+
+	// 提交事务
+	err = tx.Commit()
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("重新激活拍卖，事务提交失败: %v\n", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "事务提交失败",
+		})
+		return
+	}
+
+	logger.Info("auction", fmt.Sprintf("重新激活拍卖成功，ID: %d，物品类型: %s，数量: %d\n", auction.ID, auction.ItemType, auction.Quantity))
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "拍卖已重新激活，可以再次开始",
+	})
 }

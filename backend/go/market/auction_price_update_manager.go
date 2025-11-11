@@ -386,3 +386,24 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) IsRunning() bool {
 	defer auctionWSPriceUpdateManager.mu.Unlock()
 	return auctionWSPriceUpdateManager.isRunning
 }
+
+// 更新拍卖价格缓存
+func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) UpdateAuctionPriceCache(auctionID int, currentPrice float64) {
+	auctionWSPriceUpdateManager.cacheMutex.Lock()
+	defer auctionWSPriceUpdateManager.cacheMutex.Unlock()
+
+	// 如果拍卖不在缓存中，添加到缓存
+	if _, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; !exists {
+		auctionWSPriceUpdateManager.auctionCache[auctionID] = &AuctionCacheItem{
+			LastUpdate:   time.Now(),
+			NextUpdate:   time.Now(),
+			LastPrice:    currentPrice,
+			NeedsRefresh: true,
+		}
+	} else {
+		// 更新缓存中的价格信息
+		cacheItem := auctionWSPriceUpdateManager.auctionCache[auctionID]
+		cacheItem.LastPrice = currentPrice
+		cacheItem.LastUpdate = time.Now()
+	}
+}
