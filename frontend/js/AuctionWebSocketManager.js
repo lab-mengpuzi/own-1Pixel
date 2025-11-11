@@ -122,13 +122,8 @@ class AuctionWebSocketManager {
             // 计算并记录发送时间差
             const sendDuration = performance.now() - sendStartTime;
             
-            // 当毫秒小于1时，使用微秒级精度
-            if (sendDuration < 1) {
-                const microDuration = sendDuration * 1000;
-                console.log(`WebSocket消息发送耗时: ${microDuration.toFixed(4)}μs (微秒级精度)`);
-            } else {
-                console.log(`WebSocket消息发送耗时: ${sendDuration.toFixed(2)}ms`);
-            }
+            // 使用DurationUtils格式化时间显示
+            console.log(`WebSocket消息发送耗时: ${formatDuration(sendDuration)}`);
             
             return true;
         } catch (error) {
@@ -210,13 +205,8 @@ class AuctionWebSocketManager {
             // 计算并记录接收时间差（仅包含JSON解析时间）
             const parseDuration = performance.now() - receiveStartTime;
             
-            // 当毫秒小于1时，使用微秒级精度
-            if (parseDuration < 1) {
-                const microDuration = parseDuration * 1000;
-                console.log(`WebSocket消息解析耗时: ${microDuration.toFixed(4)}μs (微秒级精度)`);
-            } else {
-                console.log(`WebSocket消息解析耗时: ${parseDuration.toFixed(4)}ms`);
-            }
+            // 使用DurationUtils格式化时间显示
+            console.log(`WebSocket消息解析耗时: ${formatDuration(parseDuration)}`);
             
             // 如果消息包含发送时间，计算网络传输时间差
             if (message.sendTime) {
@@ -224,24 +214,14 @@ class AuctionWebSocketManager {
                 const receiveTime = new Date();
                 const networkDelay = receiveTime - sendTime;
                 
-                // 当毫秒小于1时，使用微秒级精度
-                if (networkDelay < 1) {
-                    const microNetworkDelay = networkDelay * 1000;
-                    console.log(`网络传输时间差: ${microNetworkDelay.toFixed(4)}μs (从服务器发送到客户端接收) - 微秒级精度`);
-                } else {
-                    console.log(`网络传输时间差: ${networkDelay}ms (从服务器发送到客户端接收)`);
-                }
+                // 使用DurationUtils格式化时间显示
+                console.log(`网络传输时间差: ${formatDuration(networkDelay)} (从服务器发送到客户端接收)`);
                 
                 // 计算总处理时间（从服务器发送到客户端处理完成）
                 const totalProcessingTime = networkDelay + parseDuration;
                 
-                // 当毫秒小于1时，使用微秒级精度
-                if (totalProcessingTime < 1) {
-                    const microTotalTime = totalProcessingTime * 1000;
-                    console.log(`总处理时间: ${microTotalTime.toFixed(4)}μs (从服务器发送到客户端处理完成) - 微秒级精度`);
-                } else {
-                    console.log(`总处理时间: ${totalProcessingTime.toFixed(4)}ms (从服务器发送到客户端处理完成)`);
-                }
+                // 使用DurationUtils格式化时间显示
+                console.log(`总处理时间: ${formatDuration(totalProcessingTime)} (从服务器发送到客户端处理完成)`);
             }
 
             // 处理心跳响应
@@ -403,7 +383,7 @@ class AuctionWebSocketManager {
                 this.heartbeatTimeout = setTimeout(() => {
                     console.warn('心跳超时，可能连接已断开，主动关闭连接');
                     if (this.socket) {
-                        this.socket.close(1006, '心跳超时');
+                        this.socket.close(1000, '心跳超时');
                     }
                 }, this.heartbeatTimeoutTime);
             }
@@ -591,7 +571,7 @@ class AuctionWebSocketManager {
                     this.heartbeatTimeout = setTimeout(() => {
                         console.warn('页面隐藏中心跳超时，可能连接已断开，主动关闭连接');
                         if (this.socket) {
-                            this.socket.close(1006, '页面隐藏中心跳超时');
+                            this.socket.close(1000, '页面隐藏中心跳超时');
                         }
                     }, this.heartbeatTimeoutTime * 2); // 页面隐藏时超时时间加倍
                 }
@@ -628,6 +608,30 @@ class AuctionWebSocketManager {
             }
         }
     }
+}
+
+/**
+ * 格式化时间间隔，自动选择合适的单位
+ * 当时间间隔小于1秒时，显示为毫秒
+ * 当时间间隔小于1毫秒时，显示为微秒
+ * @param {number} durationInMs - 以毫秒为单位的时间间隔
+ * @returns {string} 格式化后的时间字符串
+ */
+function formatDuration(durationInMs) {
+    // 转换为浮点数秒，便于比较
+    const seconds = durationInMs / 1000;
+    const microseconds = durationInMs * 1000;
+    
+    // 如果小于1毫秒，使用微秒
+    if (durationInMs < 1) {
+        return `${microseconds.toFixed(4)}μs`;
+    }
+    // 如果小于1秒，使用毫秒
+    if (seconds < 1) {
+        return `${durationInMs.toFixed(4)}ms`;
+    }
+    // 否则使用秒
+    return `${seconds.toFixed(4)}s`;
 }
 
 // 创建全局WebSocket管理器实例

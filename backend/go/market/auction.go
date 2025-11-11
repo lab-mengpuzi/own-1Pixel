@@ -178,8 +178,8 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 	elapsedTime := time.Since(*auction.StartTime)
 	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
 
-	// 实现逐刻度递减：每次递减1个单位
-	totalDecrement := float64(intervalsPassed) * 1.0
+	// 使用拍卖自身配置的价格递减量，而不是硬编码的1.0
+	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
 
 	// 计算新的当前价格
 	newPrice := auction.InitialPrice - totalDecrement
@@ -216,8 +216,9 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 		return
 	}
 
-	// 如果价格有变化，则更新数据库
-	if newPrice != auction.CurrentPrice {
+	// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
+	// 添加价格变化方向检查，防止价格波动
+	if newPrice != auction.CurrentPrice && newPrice <= auction.CurrentPrice {
 		_, err := db.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
 		if err != nil {
@@ -225,6 +226,9 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 			return
 		}
 		logger.Info("auction", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, auction.CurrentPrice, newPrice))
+	} else if newPrice > auction.CurrentPrice {
+		// 记录价格异常上涨的情况
+		logger.Info("auction", fmt.Sprintf("价格更新异常：计算价格 %.2f 高于当前价格 %.2f，跳过更新\n", newPrice, auction.CurrentPrice))
 	}
 }
 
@@ -1758,8 +1762,9 @@ func UpdateAuctionPrices(db *sql.DB) {
 			newPrice = auction.MinPrice
 		}
 
-		// 如果价格有变化，更新数据库
-		if newPrice != auction.CurrentPrice {
+		// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
+		// 添加价格变化方向检查，防止价格波动
+		if newPrice != auction.CurrentPrice && newPrice <= auction.CurrentPrice {
 			_, err = db.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", newPrice, auction.ID)
 			if err != nil {
 				logger.Info("auction", fmt.Sprintf("更新荷兰钟拍卖价格，更新拍卖价格失败: %v\n", err))
@@ -1768,6 +1773,9 @@ func UpdateAuctionPrices(db *sql.DB) {
 				logger.Info("auction", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, auction.CurrentPrice, newPrice))
 				updatedCount++
 			}
+		} else if newPrice > auction.CurrentPrice {
+			// 记录价格异常上涨的情况
+			logger.Info("auction", fmt.Sprintf("价格更新异常：计算价格 %.2f 高于当前价格 %.2f，跳过更新\n", newPrice, auction.CurrentPrice))
 		}
 	}
 
