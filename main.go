@@ -13,6 +13,7 @@ import (
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/market"
+	"own-1Pixel/backend/go/timeservice"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -20,13 +21,13 @@ import (
 
 //go:embed frontend/*
 var frontendFS embed.FS                                         // 静态资源二进制化
-var _config = config.GetConfig()                                // 获取配置
 var db *sql.DB                                                  // 数据库对象
 var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
 var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
+var timeServiceAPI *timeservice.TimeServiceAPI                  // 时间服务系统API
 
 // 初始化数据库
-func initDatabase() error {
+func initDatabase(_config config.Config) error {
 	err := cash.InitDatabase(db, _config.DbPath)
 	if err != nil {
 		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败: %v\n", err))
@@ -315,13 +316,17 @@ func recoverActiveAuctions() {
 func main() {
 	var err error
 
+	// 获取配置对象
+	_config := config.InitConfig()
+	fmt.Printf("初始化配置文件...[%s]\n", _config.ConfigPath)
+
 	// 初始化日志记录器
-	logger.Init("")
+	logger.Init(_config)
+	fmt.Printf("初始化日志配置文件...[%s]\n", _config.LogPath)
 
 	// 打开数据库连接
 	// 添加SQLite特定参数以提高并发性能
-	dbPathWithParams := fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.DbPath)
-	db, err = sql.Open("sqlite", dbPathWithParams)
+	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.DbPath))
 	if err != nil {
 		logger.Info("main", fmt.Sprintf("打开数据库失败: %v\n", err))
 		fmt.Printf("打开数据库失败: %v", err)
@@ -334,19 +339,33 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute) // 设置连接最大生存时间
 
 	// 初始化数据库
-	err = initDatabase()
+	err = initDatabase(_config)
 	if err != nil {
 		logger.Info("main", fmt.Sprintf("初始化数据库失败: %v\n", err))
 		fmt.Printf("初始化数据库失败: %v", err)
 		return
 	}
 	defer db.Close()
+	fmt.Printf("初始化数据库配置文件...[%s]\n", _config.DbPath)
 
 	// 初始化WebSocket管理器
 	auctionWSManager = market.InitAuctionWSManager(db)
 
 	// 初始化价格更新管理器
 	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
+
+	// 初始化时间服务系统
+	timeService, err := timeservice.InitGlobalTimeService(_config)
+	if err != nil {
+		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败: %v\n", err))
+		fmt.Printf("初始化时间服务系统失败: %v\n", err)
+		// 时间服务系统初始化失败不影响系统启动，但会记录日志
+	}
+
+	// 无论时间服务系统是否初始化成功，都创建API实例
+	// 如果时间服务系统未初始化，API将返回降级模式响应
+	timeServiceAPI = timeservice.NewTimeServiceAPI(timeService)
+	logger.Info("main", "时间服务系统API已创建\n")
 
 	// 检查并恢复进行中的拍卖
 	recoverActiveAuctions()
@@ -409,6 +428,15 @@ func main() {
 
 	// WebSocket端点
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
+
+	// 时间服务系统API端点
+	if timeServiceAPI != nil {
+		http.HandleFunc("/api/timeservice/time-info", timeServiceAPI.GetTimeInfo)
+		http.HandleFunc("/api/timeservice/status", timeServiceAPI.GetStatus)
+		http.HandleFunc("/api/timeservice/stats", timeServiceAPI.GetStats)
+		http.HandleFunc("/api/timeservice/circuit-breaker", timeServiceAPI.GetCircuitBreakerState)
+		http.HandleFunc("/api/timeservice/ntp-pool", timeServiceAPI.GetNTPPool)
+	}
 
 	// 记录服务器启动日志
 	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", _config.Port))
