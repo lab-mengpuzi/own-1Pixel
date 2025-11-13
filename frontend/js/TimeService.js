@@ -193,9 +193,6 @@ class TimeService {
                     </div>
                 </div>
                 <div class="mt-6">
-                    <button id="force-sync" class="bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded mr-2">
-                        <i class="fa fa-refresh mr-2"></i>强制同步
-                    </button>
                     <button id="refresh-cb" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded">
                         <i class="fa fa-refresh mr-2"></i>刷新状态
                     </button>
@@ -273,14 +270,6 @@ class TimeService {
                 this.loadCircuitBreakerState();
             });
         }
-
-        // 强制同步按钮
-        const forceSyncBtn = document.getElementById('force-sync');
-        if (forceSyncBtn) {
-            forceSyncBtn.addEventListener('click', () => {
-                this.forceSync();
-            });
-        }
     }
 
     // 加载初始数据
@@ -319,7 +308,7 @@ class TimeService {
             document.getElementById('trusted-time').textContent = data.trusted_time;
             document.getElementById('trusted-timestamp').textContent = `时间戳: ${data.trusted_timestamp}`;
             document.getElementById('system-time').textContent = data.system_time;
-            document.getElementById('time-offset').textContent = this.formatNanoseconds(data.time_offset);
+            document.getElementById('time-offset').textContent = this.formatNanoseconds(data.sync_time_offset);
             
             // 更新服务模式
             const modeElement = document.getElementById('service-mode');
@@ -564,51 +553,13 @@ class TimeService {
         }
     }
 
-    // 强制同步
-    async forceSync() {
-        const button = document.getElementById('force-sync');
-        const originalText = button.innerHTML;
-        
-        try {
-            // 禁用按钮并显示加载状态
-            button.disabled = true;
-            button.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i>同步中...';
-            
-            const response = await fetch('/api/timeservice/force-sync', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                this.showSuccess('时间同步成功');
-                // 同步成功后刷新所有数据
-                this.loadTimeInfo();
-                this.loadStatus();
-                this.loadStats();
-                this.loadCircuitBreakerState();
-            } else {
-                throw new Error(data.message || '同步失败');
-            }
-        } catch (error) {
-            console.error('强制同步失败:', error);
-            this.showError('强制同步失败: ' + error.message);
-        } finally {
-            // 恢复按钮状态
-            button.disabled = false;
-            button.innerHTML = originalText;
-        }
-    }
-
     // 格式化纳秒为可读格式
     formatNanoseconds(nanoseconds) {
+        // 处理 null、undefined 或 NaN 的情况
+        if (nanoseconds === null || nanoseconds === undefined || isNaN(nanoseconds)) {
+            return '未知';
+        }
+        
         if (nanoseconds === 0) return '0';
         
         const absNs = Math.abs(nanoseconds);

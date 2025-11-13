@@ -13,8 +13,8 @@ type TimeServiceAPI struct {
 	timeService *TimeService
 }
 
-// InitTimeServiceAPI 创建时间服务API处理器
-func InitTimeServiceAPI(ts *TimeService) *TimeServiceAPI {
+// NewTimeServiceAPI 创建时间服务API处理器
+func NewTimeServiceAPI(ts *TimeService) *TimeServiceAPI {
 	return &TimeServiceAPI{
 		timeService: ts,
 	}
@@ -25,7 +25,7 @@ type TimeServiceATimeInfoResponse struct {
 	TrustedTimestamp int64  `json:"trusted_timestamp"` // 可信时间戳（纳秒）
 	TrustedTime      string `json:"trusted_time"`      // 格式化的可信时间
 	SystemTime       string `json:"system_time"`       // 系统时间
-	TimeOffset       int64  `json:"time_offset"`       // 时间偏移量（纳秒）
+	SyncTimeOffset   int64  `json:"sync_time_offset"`  // 同步时间偏移量（纳秒）
 	IsDegraded       bool   `json:"is_degraded"`       // 是否处于降级模式
 }
 
@@ -96,7 +96,7 @@ func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 			TrustedTimestamp: systemTime.UnixNano(),
 			TrustedTime:      systemTime.Format("2006-01-02 15:04:05.000000000"),
 			SystemTime:       systemTime.Format("2006-01-02 15:04:05.000000000"),
-			TimeOffset:       0,
+			SyncTimeOffset:   0,
 			IsDegraded:       true,
 		}
 
@@ -109,7 +109,7 @@ func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 	trustedTimestamp := api.timeService.GetTrustedTimestamp()
 	trustedTime := api.timeService.GetTrustedTime()
 	systemTime := time.Now()
-	timeOffset := api.timeService.GetTimeOffset()
+	syncTimeOffset := api.timeService.GetSyncTimeOffset()
 	isDegraded := api.timeService.IsInDegradedMode()
 
 	// 构建响应
@@ -117,7 +117,7 @@ func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 		TrustedTimestamp: trustedTimestamp,
 		TrustedTime:      trustedTime.Format("2006-01-02 15:04:05.000000000"),
 		SystemTime:       systemTime.Format("2006-01-02 15:04:05.000000000"),
-		TimeOffset:       timeOffset,
+		SyncTimeOffset:   syncTimeOffset,
 		IsDegraded:       isDegraded,
 	}
 
@@ -340,79 +340,6 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	// 返回JSON响应
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Info("TimeServiceAPI", fmt.Sprintf("编码NTP池信息响应失败: %v\n", err))
-		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
-		return
-	}
-}
-
-// ForceSync 强制同步时间
-func (api *TimeServiceAPI) ForceSync(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 检查时间服务是否可用
-	if api.timeService == nil {
-		// 时间服务未初始化，返回错误
-		response := map[string]interface{}{
-			"status":  "error",
-			"message": "时间服务未初始化，无法执行同步",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// 检查时间服务是否已初始化
-	status := api.timeService.GetStatus()
-	if !status.IsInitialized {
-		response := map[string]interface{}{
-			"status":  "error",
-			"message": "时间服务未完成初始化，无法执行同步",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// 执行强制同步
-	err := api.timeService.ForceSync()
-	if err != nil {
-		logger.Info("TimeServiceAPI", fmt.Sprintf("强制同步失败: %v\n", err))
-		response := map[string]interface{}{
-			"status":  "error",
-			"message": fmt.Sprintf("强制同步失败: %v", err),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// 获取同步后的时间信息
-	trustedTime := api.timeService.GetTrustedTime()
-	timeOffset := api.timeService.GetTimeOffset()
-
-	// 构建成功响应
-	response := map[string]interface{}{
-		"status":       "success",
-		"message":      "时间同步成功",
-		"trusted_time": trustedTime.Format("2006-01-02 15:04:05.000000000"),
-		"time_offset":  timeOffset,
-	}
-
-	// 设置响应头
-	w.Header().Set("Content-Type", "application/json")
-
-	// 返回JSON响应
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Info("TimeServiceAPI", fmt.Sprintf("编码强制同步响应失败: %v\n", err))
 		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
 		return
 	}

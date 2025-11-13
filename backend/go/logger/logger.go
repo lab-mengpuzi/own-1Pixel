@@ -39,12 +39,13 @@ func isValidPath(path string) bool {
 }
 
 // Init 初始化日志记录器
-func Init(logPath string) {
+func Init(_config config.Config) {
+	var logPath string
+
 	// 确定使用的日志路径
 	if logPath == "" || !isValidPath(logPath) {
 		// 使用默认配置中的日志路径
-		logPath = config.GetConfig().LogPath
-		fmt.Printf("Using default log path: %s\n", logPath)
+		logPath = _config.LogPath
 	}
 
 	// 如果日志文件未打开，则打开或创建它

@@ -14,29 +14,22 @@ import (
 
 // TimeService 提供金融级可信时间服务
 type TimeService struct {
-	// 全局时间偏移量（可信基准时间 - 单调时钟起点时间），原子更新
-	timeOffset int64
+	config             TimeServiceConfig                 // 配置参数
+	ntpServers         []TimeServiceNTPServer            // NTP服务器配置
+	status             TimeServiceStatus                 // 时间服务状态
+	circuitBreaker     TimeServiceCircuitBreakerState    // 熔断器状态
+	lastNTPSamples     map[string][]TimeServiceNTPSample // 上一次获取的NTP样本数据，按服务器地址存储
+	syncTimeOffset     int64                             // 全局时间偏移量（可信基准时间 - 单调时钟起点时间），原子更新
+	monotonicTimeStart time.Time                         // 单调时钟起点时间
+	stats              TimeServiceStats                  // 统计信息
+}
 
-	// 单调时钟起点时间
-	monotonicStart time.Time
-
-	// NTP服务器配置
-	ntpServers []TimeServiceNTPServer
-
-	// 时间服务状态
-	status TimeServiceStatus
-
-	// 熔断器状态
-	circuitBreaker TimeServiceCircuitBreakerState
-
-	// 统计信息
-	stats TimeServiceStats
-
-	// 配置参数
-	config TimeServiceConfig
-
-	// 上一次获取的NTP样本数据，按服务器地址存储
-	lastNTPSamples map[string][]TimeServiceNTPSample
+// TimeServiceConfig 时间服务配置
+type TimeServiceConfig struct {
+	SyncInterval     time.Duration // 同步间隔
+	MaxDeviation     int64         // 最大允许偏差(纳秒)
+	FailureThreshold int64         // 失败阈值
+	RecoveryTimeout  time.Duration // 恢复超时
 }
 
 // TimeServiceNTPServer NTP服务器配置
@@ -74,34 +67,12 @@ type TimeServiceCircuitBreakerState struct {
 	SuccessCount    int64     // 成功计数
 }
 
-// TimeServiceConfig 时间服务配置
-type TimeServiceConfig struct {
-	SyncInterval     time.Duration // 同步间隔
-	MaxDeviation     int64         // 最大允许偏差(纳秒)
-	FailureThreshold int64         // 失败阈值
-	RecoveryTimeout  time.Duration // 恢复超时
-}
-
-// InitTimeService 创建新的时间服务实例
-func InitTimeService() *TimeService {
-	// 从配置包获取配置
-	appConfig := config.GetConfig()
-
-	// 转换配置类型
-	timeServiceConfig := TimeServiceConfig{
-		SyncInterval:     appConfig.TimeService.SyncInterval,
-		MaxDeviation:     appConfig.TimeService.MaxDeviation,
-		FailureThreshold: appConfig.TimeService.FailureThreshold,
-		RecoveryTimeout:  appConfig.TimeService.RecoveryTimeout,
-	}
-
-	// 获取NTP服务器配置
-	ntpServersConfig := config.GetDefaultNTPServers()
-
+// NewTimeService 创建新的时间服务实例
+func NewTimeService(_config config.Config) *TimeService {
 	// 转换NTP服务器配置类型
-	var ntpServers []TimeServiceNTPServer
-	for _, server := range ntpServersConfig {
-		ntpServers = append(ntpServers, TimeServiceNTPServer{
+	var ntpServer []TimeServiceNTPServer
+	for _, server := range _config.NTPServer {
+		ntpServer = append(ntpServer, TimeServiceNTPServer{
 			Name:         server.Name,
 			Address:      server.Address,
 			Weight:       server.Weight,
@@ -111,33 +82,52 @@ func InitTimeService() *TimeService {
 	}
 
 	return &TimeService{
-		config:         timeServiceConfig,
-		ntpServers:     ntpServers,
-		status:         TimeServiceStatus{IsInitialized: false},
-		circuitBreaker: TimeServiceCircuitBreakerState{IsOpen: false},
-		lastNTPSamples: make(map[string][]TimeServiceNTPSample), // 初始化样本数据存储
+		config: TimeServiceConfig{
+			SyncInterval:     _config.TimeService.SyncInterval,
+			MaxDeviation:     _config.TimeService.MaxDeviation,
+			FailureThreshold: _config.TimeService.FailureThreshold,
+			RecoveryTimeout:  _config.TimeService.RecoveryTimeout,
+		},
+		ntpServers:     ntpServer,
+		syncTimeOffset: 0,
+		status: TimeServiceStatus{
+			IsInitialized: false,
+		},
+		circuitBreaker: TimeServiceCircuitBreakerState{
+			IsOpen: false,
+		},
+		lastNTPSamples: make(map[string][]TimeServiceNTPSample),
 	}
 }
 
 // Init 初始化时间服务
 func (ts *TimeService) Init() error {
-	logger.Info("TimeService", "初始化金融级时间服务...\n")
-	fmt.Printf("开始初始化金融级时间服务...\n")
+	logger.Info("TimeService", "初始化金融级时间服务系统...\n")
+	fmt.Printf("初始化金融级时间服务系统...\n")
 
 	// 1. 记录单调时钟起点（仅初始化一次）
-	ts.monotonicStart = time.Now()
+	ts.monotonicTimeStart = time.Now()
 
 	// 2. 同步多源NTP获取初始基准时间
-	trustedBaseTime, err := ts.syncMultiNTP()
+	trustedBaseTime, err := ts.syncMultiNTPTime()
+	
+	// 无论成功还是失败，都要更新总同步计数
+	atomic.AddInt64(&ts.stats.TotalSyncs, 1)
+	
 	if err != nil {
+		// 首次同步失败
+		atomic.AddInt64(&ts.stats.FailedSyncs, 1)
 		logger.Info("TimeService", fmt.Sprintf("初始化NTP同步失败: %v\n", err))
 		fmt.Printf("初始化NTP同步失败: %v\n", err)
 		return fmt.Errorf("初始化NTP同步失败: %v", err)
 	}
 
-	// 3. 计算初始偏移量（纳秒级）
-	initialOffset := trustedBaseTime.UnixNano() - ts.monotonicStart.UnixNano()
-	atomic.StoreInt64(&ts.timeOffset, initialOffset)
+	// 计算初始偏移量
+	initialOffset := trustedBaseTime.UnixNano() - ts.monotonicTimeStart.UnixNano()
+	atomic.StoreInt64(&ts.syncTimeOffset, initialOffset)
+	
+	// 更新统计计数器 - 首次同步成功
+	atomic.AddInt64(&ts.stats.SuccessfulSyncs, 1)
 
 	// 4. 更新状态
 	ts.status.IsInitialized = true
@@ -159,7 +149,7 @@ func (ts *TimeService) GetTrustedTimestamp() int64 {
 	monotonicNow := time.Now().UnixNano()
 
 	// 叠加可信偏移量，得到绝对时间戳
-	return monotonicNow + atomic.LoadInt64(&ts.timeOffset)
+	return monotonicNow + atomic.LoadInt64(&ts.syncTimeOffset)
 }
 
 // GetTrustedTime 获取格式化的可信时间
@@ -248,14 +238,14 @@ func (ts *TimeService) syncWithRetry() {
 // updateOffset 更新时间偏移量
 func (ts *TimeService) updateOffset() error {
 	// 获取可信基准时间
-	trustedBaseTime, err := ts.syncMultiNTP()
+	trustedBaseTime, err := ts.syncMultiNTPTime()
 	if err != nil {
 		return err
 	}
 
 	// 计算新的偏移量
-	newOffset := trustedBaseTime.UnixNano() - ts.monotonicStart.UnixNano()
-	currentOffset := atomic.LoadInt64(&ts.timeOffset)
+	newOffset := trustedBaseTime.UnixNano() - ts.monotonicTimeStart.UnixNano()
+	currentOffset := atomic.LoadInt64(&ts.syncTimeOffset)
 
 	// 检查偏移量变化是否在合理范围内
 	offsetChange := newOffset - currentOffset
@@ -266,14 +256,14 @@ func (ts *TimeService) updateOffset() error {
 	}
 
 	// 更新偏移量
-	atomic.StoreInt64(&ts.timeOffset, newOffset)
+	atomic.StoreInt64(&ts.syncTimeOffset, newOffset)
 	ts.status.ActiveNTPSources = len(ts.getValidNTPServers())
 
 	return nil
 }
 
-// syncMultiNTP 多源NTP同步，每个服务器获取5个样本，最少连续3次成功就算成功
-func (ts *TimeService) syncMultiNTP() (time.Time, error) {
+// syncMultiNTPTime 多源NTP同步，每个服务器获取5个样本，最少连续3次成功就算成功
+func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
 	logger.Info("TimeService", "开始多源NTP同步（每个服务器获取5个样本，最少连续3次成功就算成功）...\n")
 
 	var validTimes []TimeServiceNTPTimeResult
@@ -629,19 +619,14 @@ func (ts *TimeService) SetConfig(config TimeServiceConfig) {
 	ts.config = config
 }
 
-// ForceSync 强制立即同步一次
-func (ts *TimeService) ForceSync() error {
-	return ts.updateOffset()
-}
-
 // IsInDegradedMode 检查是否处于降级模式
 func (ts *TimeService) IsInDegradedMode() bool {
 	return ts.status.IsDegraded
 }
 
-// GetTimeOffset 获取当前时间偏移量
-func (ts *TimeService) GetTimeOffset() int64 {
-	return atomic.LoadInt64(&ts.timeOffset)
+// GetSyncTimeOffset 获取当前时间偏移量
+func (ts *TimeService) GetSyncTimeOffset() int64 {
+	return atomic.LoadInt64(&ts.syncTimeOffset)
 }
 
 // GetNTPServers 获取NTP服务器列表
@@ -652,15 +637,15 @@ func (ts *TimeService) GetNTPServers() []TimeServiceNTPServer {
 // 全局时间服务实例
 var globalTimeService *TimeService
 
-// InitGlobalTimeService 初始化全局时间服务
-func InitGlobalTimeService() error {
-	globalTimeService = InitTimeService()
-	return globalTimeService.Init()
-}
-
-// GetGlobalTimeService 获取全局时间服务实例
-func GetGlobalTimeService() *TimeService {
-	return globalTimeService
+// InitGlobalTimeService 初始化全局时间服务并返回实例
+func InitGlobalTimeService(_config config.Config) (*TimeService, error) {
+	// 使用获取的NTP服务器配置初始化时间服务
+	globalTimeService = NewTimeService(_config)
+	err := globalTimeService.Init()
+	if err != nil {
+		return nil, err
+	}
+	return globalTimeService, nil
 }
 
 // GetTrustedTimestamp 获取全局金融级可信时间戳
