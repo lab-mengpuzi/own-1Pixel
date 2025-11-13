@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>状态页 - 时间服务系统</title>
+    <link href="data:," type="image/x-icon" rel="icon">
+    <link href="../css/font-awesome.min.css" rel="stylesheet">
+    <script src="../js/cdn.tailwindcss.com.js"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    primary: '#3b82f6',
+                    secondary: '#64748b',
+                    accent: '#06b6d4',
+                    dark: '#1e293b',
+                    light: '#f8fafc',
+                    success: '#10b981',
+                    danger: '#ef4444'
+                },
+                fontFamily: {
+                    inter: ['Inter', 'sans-serif'],
+                    mono: ['JetBrains Mono', 'monospace']
+                }
+            }
+        }
+    }
+    </script>
+    <style>
+    @layer utilities {
+        .content-auto {
+            content-visibility: auto;
+        }
+    }
+    .tab-content {
+        display: block;
+    }
+    .tab-content.hidden {
+        display: none;
+    }
+    .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 24px;
+        border-radius: 4px;
+        color: white;
+        font-weight: 500;
+        z-index: 1000;
+        transform: translateY(100px);
+        opacity: 0;
+        transition: all 0.3s ease;
+    }
+    .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    .toast.success {
+        background-color: #10b981;
+    }
+    .toast.error {
+        background-color: #ef4444;
+    }
+    .toast.info {
+        background-color: #3b82f6;
+    }
+    </style>
+</head>
+
+<body class="bg-gray-50 font-inter text-dark min-h-screen flex flex-col">
+    <!-- 页眉 -->
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-clock-o text-primary text-2xl"></i>
+                <h1 class="text-xl font-bold text-gray-800">时间服务系统</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="index.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="现金余额跟踪系统">
+                    <i class="fa fa-home text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">首页</span>
+                </a>
+                <a href="market.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="动态供需平衡定价系统">
+                    <i class="fa fa-shopping-cart text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">市场</span>
+                </a>
+                <a href="auction.html" class="bg-white hover:bg-gray-300 p-2 rounded-full transition-colors duration-200" title="荷兰钟拍卖系统">
+                    <i class="fa fa-gavel text-gray-600"></i>
+                    <span class="ml-1 hidden sm:inline">拍卖</span>
+                </a>
+                <a href="timeservice.html" class="bg-primary hover:bg-blue-600 p-2 rounded-full transition-colors duration-200" title="时间服务系统">
+                    <i class="fa fa-clock-o text-gray-600 text-white"></i>
+                    <span class="ml-1 hidden sm:inline text-white">状态</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-6">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-800">状态页 - 时间服务系统</h1>
+        </div>
+
+        <!-- 标签页导航 -->
+        <div class="bg-white rounded-lg shadow-md mb-6">
+            <nav class="border-b border-gray-200">
+                <div class="flex space-x-8 px-6" aria-label="Tabs">
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm border-blue-500 text-blue-600" data-tab="time-info">
+                        <i class="fa fa-clock-o mr-2"></i>时间信息
+                    </button>
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="status">
+                        <i class="fa fa-info-circle mr-2"></i>服务状态
+                    </button>
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="stats">
+                        <i class="fa fa-bar-chart mr-2"></i>统计信息
+                    </button>
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="circuit-breaker">
+                        <i class="fa fa-exclamation-triangle mr-2"></i>熔断器状态
+                    </button>
+                </div>
+            </nav>
+        </div>
+
+        <!-- 标签页内容将通过JavaScript动态生成 -->
+    </main>
+
+    <footer class="bg-white border-t border-gray-200 py-4">
+        <div class="container mx-auto px-4 text-center text-sm text-gray-500">
+            <p>可信时间服务系统 - <a href="https://whois.aliyun.com/rdap/domain/mengpuzi.top" target="_blank">萌铺子国际独立站</a> 由 豆包 & TRAECN 强力驱动 &copy; 2025</p>
+        </div>
+    </footer>
+
+    <script src="../js/TimeService.js"></script>
+</body>
+</html>

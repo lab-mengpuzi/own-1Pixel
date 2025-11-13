@@ -13,6 +13,7 @@ import (
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/market"
+	"own-1Pixel/backend/go/timeservice"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,6 +25,7 @@ var _config = config.GetConfig()                                // 获取配置
 var db *sql.DB                                                  // 数据库对象
 var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
 var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
+var timeServiceAPI *timeservice.TimeServiceAPI                  // 时间服务API
 
 // 初始化数据库
 func initDatabase() error {
@@ -348,6 +350,20 @@ func main() {
 	// 初始化价格更新管理器
 	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
 
+	// 初始化时间服务
+	err = timeservice.InitGlobalTimeService()
+	if err != nil {
+		logger.Info("main", fmt.Sprintf("初始化时间服务失败: %v\n", err))
+		fmt.Printf("初始化时间服务失败: %v\n", err)
+		// 时间服务初始化失败不影响系统启动，但会记录日志
+	}
+
+	// 无论时间服务是否初始化成功，都创建API实例
+	// 如果时间服务未初始化，API将返回降级模式响应
+	timeService := timeservice.GetGlobalTimeService()
+	timeServiceAPI = timeservice.InitTimeServiceAPI(timeService)
+	logger.Info("main", "时间服务API已创建\n")
+
 	// 检查并恢复进行中的拍卖
 	recoverActiveAuctions()
 
@@ -409,6 +425,16 @@ func main() {
 
 	// WebSocket端点
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
+
+	// 时间服务API端点
+	if timeServiceAPI != nil {
+		http.HandleFunc("/api/timeservice/time-info", timeServiceAPI.GetTimeInfo)
+		http.HandleFunc("/api/timeservice/status", timeServiceAPI.GetStatus)
+		http.HandleFunc("/api/timeservice/stats", timeServiceAPI.GetStats)
+		http.HandleFunc("/api/timeservice/circuit-breaker", timeServiceAPI.GetCircuitBreakerState)
+		http.HandleFunc("/api/timeservice/force-sync", timeServiceAPI.ForceSync)
+		http.HandleFunc("/api/timeservice/ntp-pool", timeServiceAPI.GetNTPPool)
+	}
 
 	// 记录服务器启动日志
 	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", _config.Port))
