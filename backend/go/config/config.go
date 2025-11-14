@@ -34,6 +34,7 @@ type TimeServiceNTPServer struct {
 	Weight       float64 `json:"weight"`       // 权重
 	IsDomestic   bool    `json:"isDomestic"`   // 是否为国内服务器
 	MaxDeviation int64   `json:"maxDeviation"` // 最大允许偏差(纳秒)
+	IsSelected   bool    `json:"isSelected"`   // 是否被选中用于时间同步
 }
 
 // 默认配置对象
@@ -50,10 +51,10 @@ var config = Config{
 		RecoveryTimeout:  60 * time.Second,              // 恢复超时
 	},
 	NTPServer: []TimeServiceNTPServer{
-		{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 10.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds()},
-		{Name: "上海交通大学", Address: "ntp.sjtu.edu.cn", Weight: 5.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds()},
-		{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 2.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds()},
-		{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 1.0, IsDomestic: false, MaxDeviation: 2 * time.Second.Nanoseconds()},
+		{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 4.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
+		{Name: "上海交通大学", Address: "ntp.sjtu.edu.cn", Weight: 3.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
+		{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 2.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
+		{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 1.0, IsDomestic: false, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
 	}, // 使用默认NTP服务器列表初始化
 }
 

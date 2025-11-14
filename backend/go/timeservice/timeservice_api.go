@@ -31,38 +31,27 @@ type TimeServiceATimeInfoResponse struct {
 
 // TimeServiceAStatusResponse 状态响应
 type TimeServiceAStatusResponse struct {
-	IsInitialized    bool   `json:"is_initialized"`     // 是否已初始化
-	IsOnline         bool   `json:"is_online"`          // 是否在线（NTP同步正常）
-	IsDegraded       bool   `json:"is_degraded"`        // 是否降级模式
-	LastSyncTime     string `json:"last_sync_time"`     // 最后同步时间
-	ActiveNTPSources int    `json:"active_ntp_sources"` // 活跃NTP源数量
+	IsInitialized bool   `json:"is_initialized"` // 是否已初始化
+	IsDegraded    bool   `json:"is_degraded"`    // 是否降级模式
+	LastSyncTime  string `json:"last_sync_time"` // 最后同步时间
 }
 
 // TimeServiceAStatsResponse 统计信息响应
 type TimeServiceAStatsResponse struct {
-	TotalSyncs       int64   `json:"total_syncs"`       // 总同步次数
-	SuccessfulSyncs  int64   `json:"successful_syncs"`  // 成功同步次数
-	FailedSyncs      int64   `json:"failed_syncs"`      // 失败同步次数
-	AverageDeviation float64 `json:"average_deviation"` // 平均偏差（纳秒）
-	MaxDeviation     int64   `json:"max_deviation"`     // 最大偏差（纳秒）
+	TotalSyncs      int64   `json:"total_syncs"`      // 总同步次数
+	SuccessfulSyncs int64   `json:"successful_syncs"` // 成功同步次数
+	FailedSyncs     int64   `json:"failed_syncs"`     // 失败同步次数
+	LastDeviation   float64 `json:"last_deviation"`   // 最后偏差（纳秒）
+	MaxDeviation    int64   `json:"max_deviation"`    // 最大偏差（纳秒）
 }
 
 // TimeServiceANTPPoolResponse NTP池信息响应
 type TimeServiceANTPPoolResponse struct {
-	NTPServers []TimeServiceANTPServerInfo `json:"ntp_servers"` // NTP服务器列表
+	NTPServers []TimeServiceANTPServer `json:"ntp_servers"` // NTP服务器列表
 }
 
-// TimeServiceANTPSample NTP样本数据
-type TimeServiceANTPSample struct {
-	Offset     int64  `json:"offset"`      // 时间偏移量（纳秒）
-	Delay      int64  `json:"delay"`       // 往返延迟（纳秒）
-	Timestamp  int64  `json:"timestamp"`   // 时间戳（纳秒）
-	IsSelected bool   `json:"is_selected"` // 是否被选中用于时间计算
-	Status     string `json:"status"`      // 样本状态：成功、失败
-}
-
-// TimeServiceANTPServerInfo NTP服务器信息
-type TimeServiceANTPServerInfo struct {
+// TimeServiceANTPServer NTP服务器信息
+type TimeServiceANTPServer struct {
 	Name         string                  `json:"name"`           // 服务器名称
 	Address      string                  `json:"address"`        // 服务器地址
 	Weight       float64                 `json:"weight"`         // 权重
@@ -71,6 +60,15 @@ type TimeServiceANTPServerInfo struct {
 	IsActive     bool                    `json:"is_active"`      // 是否活跃
 	LastSyncTime string                  `json:"last_sync_time"` // 最后同步时间
 	Samples      []TimeServiceANTPSample `json:"samples"`        // 上一次获取的样本数据
+	IsSelected   bool                    `json:"is_selected"`    // 是否被选中用于时间同步
+}
+
+// TimeServiceANTPSample NTP样本数据
+type TimeServiceANTPSample struct {
+	Offset    int64  `json:"offset"`    // 时间偏移量（纳秒）
+	Delay     int64  `json:"delay"`     // 往返延迟（纳秒）
+	Timestamp int64  `json:"timestamp"` // 时间戳（纳秒）
+	Status    string `json:"status"`    // 样本状态：成功、失败
 }
 
 // TimeServiceACircuitBreakerResponse 熔断器状态响应
@@ -143,11 +141,9 @@ func (api *TimeServiceAPI) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if api.timeService == nil {
 		// 时间服务未初始化，返回未初始化状态
 		response := TimeServiceAStatusResponse{
-			IsInitialized:    false,
-			IsOnline:         false,
-			IsDegraded:       true,
-			LastSyncTime:     time.Time{}.Format("2006-01-02 15:04:05.000000000"),
-			ActiveNTPSources: 0,
+			IsInitialized: false,
+			IsDegraded:    true,
+			LastSyncTime:  time.Time{}.Format("2006-01-02 15:04:05.000000000"),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -160,11 +156,9 @@ func (api *TimeServiceAPI) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	// 构建响应
 	response := TimeServiceAStatusResponse{
-		IsInitialized:    status.IsInitialized,
-		IsOnline:         status.IsOnline,
-		IsDegraded:       status.IsDegraded,
-		LastSyncTime:     status.LastSyncTime.Format("2006-01-02 15:04:05.000000000"),
-		ActiveNTPSources: status.ActiveNTPSources,
+		IsInitialized: status.IsInitialized,
+		IsDegraded:    status.IsDegraded,
+		LastSyncTime:  status.LastSyncTime.Format("2006-01-02 15:04:05.000000000"),
 	}
 
 	// 设置响应头
@@ -189,11 +183,11 @@ func (api *TimeServiceAPI) GetStats(w http.ResponseWriter, r *http.Request) {
 	if api.timeService == nil {
 		// 时间服务未初始化，返回空统计信息
 		response := TimeServiceAStatsResponse{
-			TotalSyncs:       0,
-			SuccessfulSyncs:  0,
-			FailedSyncs:      0,
-			AverageDeviation: 0,
-			MaxDeviation:     0,
+			TotalSyncs:      0,
+			SuccessfulSyncs: 0,
+			FailedSyncs:     0,
+			LastDeviation:   0,
+			MaxDeviation:    0,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -273,7 +267,7 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	if api.timeService == nil {
 		// 时间服务未初始化，返回空NTP池
 		response := TimeServiceANTPPoolResponse{
-			NTPServers: []TimeServiceANTPServerInfo{},
+			NTPServers: []TimeServiceANTPServer{},
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -285,7 +279,7 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	ntpServers := api.timeService.GetNTPServers()
 
 	// 转换为响应格式
-	var ntpServerInfos []TimeServiceANTPServerInfo
+	var ntpServerInfos []TimeServiceANTPServer
 	for _, server := range ntpServers {
 		// 查询服务器详细信息
 		_, err := api.timeService.QueryNTPServerDetailed(server)
@@ -297,17 +291,16 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 			// 转换为API响应格式
 			for _, sample := range serverSamples {
 				samples = append(samples, TimeServiceANTPSample{
-					Offset:     int64(sample.Deviation), // 使用Deviation作为Offset
-					Delay:      sample.RTT,              // 使用RTT作为Delay
-					Timestamp:  sample.Timestamp,
-					IsSelected: sample.IsSelected, // 使用实际的IsSelected值
-					Status:     sample.Status,     // 使用实际的Status值
+					Offset:    int64(sample.Deviation), // 使用Deviation作为Offset
+					Delay:     sample.RTT,              // 使用RTT作为Delay
+					Timestamp: sample.Timestamp,
+					Status:    sample.Status, // 使用实际的Status值
 				})
 			}
 		}
 
 		// 基本信息始终填充
-		serverInfo := TimeServiceANTPServerInfo{
+		serverInfo := TimeServiceANTPServer{
 			Name:         server.Name,
 			Address:      server.Address,
 			Weight:       server.Weight,
@@ -315,7 +308,8 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 			MaxDeviation: server.MaxDeviation,
 			IsActive:     true, // 默认所有服务器都是活跃的，实际应用中可以根据状态判断
 			LastSyncTime: time.Now().Format("2006-01-02 15:04:05.000000000"),
-			Samples:      samples, // 添加样本数据
+			Samples:      samples,           // 添加样本数据
+			IsSelected:   server.IsSelected, // 添加IsSelected字段
 		}
 
 		// 如果查询成功，填充基本信息

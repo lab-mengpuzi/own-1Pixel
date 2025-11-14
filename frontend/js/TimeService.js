@@ -94,15 +94,11 @@ class TimeService {
                         <p id="init-status" class="text-gray-600">加载中...</p>
                     </div>
                     <div>
-                        <h3 class="text-lg font-medium text-gray-700 mb-2">在线状态</h3>
-                        <p id="online-status" class="text-gray-600">加载中...</p>
-                    </div>
-                </div>
-                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">降级模式</h3>
                         <p id="degraded-status" class="text-gray-600">加载中...</p>
                     </div>
+                </div>
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-1 gap-6">
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">最后同步时间</h3>
                         <p id="last-sync-time" class="text-gray-600">加载中...</p>
@@ -148,11 +144,7 @@ class TimeService {
                 </div>
                 <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <h3 class="text-lg font-medium text-gray-700 mb-2">平均偏差</h3>
-                        <p id="average-deviation" class="text-gray-600">加载中...</p>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-medium text-gray-700 mb-2">最大偏差</h3>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">偏差</h3>
                         <p id="max-deviation" class="text-gray-600">加载中...</p>
                     </div>
                 </div>
@@ -339,10 +331,6 @@ class TimeService {
             initStatus.textContent = data.is_initialized ? '已初始化' : '未初始化';
             initStatus.className = data.is_initialized ? 'text-green-600 font-medium' : 'text-red-600 font-medium';
             
-            const onlineStatus = document.getElementById('online-status');
-            onlineStatus.textContent = data.is_online ? '在线' : '离线';
-            onlineStatus.className = data.is_online ? 'text-green-600 font-medium' : 'text-red-600 font-medium';
-            
             const degradedStatus = document.getElementById('degraded-status');
             degradedStatus.textContent = data.is_degraded ? '降级模式' : '正常模式';
             degradedStatus.className = data.is_degraded ? 'text-orange-600 font-medium' : 'text-green-600 font-medium';
@@ -373,9 +361,9 @@ class TimeService {
                 
                 // 显示所有NTP服务器
                 data.ntp_servers.forEach((server, index) => {
-                    const statusClass = server.is_active ? 'text-green-600' : 'text-red-600';
-                    const statusText = server.is_active ? '在线' : '离线';
                     const serverTypeClass = server.is_domestic ? 'text-green-600' : 'text-blue-600';
+                    const selectedClass = server.is_selected ? 'text-green-600' : 'text-gray-400';
+                    const selectedText = server.is_selected ? '已选中' : '未选中';
                     
                     html += `
                         <div class="border rounded-lg overflow-hidden">
@@ -388,7 +376,7 @@ class TimeService {
                                     <div class="flex items-center">
                                         <span class="text-sm text-gray-600 mr-3">权重: ${server.weight}</span>
                                         <span class="${serverTypeClass} text-sm mr-2">${server.is_domestic ? '国内' : '国外'}</span>
-                                        <span class="${statusClass} text-sm mr-3">${statusText}</span>
+                                        <span class="${selectedClass} text-sm mr-3">${selectedText}</span>
                                         <i class="fa fa-chevron-down text-gray-400 transition-transform ntp-expand-icon"></i>
                                     </div>
                                 </div>
@@ -411,12 +399,12 @@ class TimeService {
                                                 <span>${server.weight}</span>
                                             </div>
                                             <div class="flex justify-between">
-                                                <span class="text-gray-600">状态:</span>
-                                                <span class="${statusClass}">${statusText}</span>
-                                            </div>
-                                            <div class="flex justify-between">
                                                 <span class="text-gray-600">服务器类型:</span>
                                                 <span class="${serverTypeClass}">${server.is_domestic ? '国内服务器' : '国外服务器'}</span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">选中状态:</span>
+                                                <span class="${selectedClass}">${server.is_selected ? '已选中用于时间同步' : '未选中'}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -429,7 +417,7 @@ class TimeService {
                                             </div>
                                             <div class="flex justify-between">
                                                 <span class="text-gray-600">最大偏差:</span>
-                                                <span>${server.max_deviation ? (server.max_deviation / 1e6).toFixed(2) + 'ms' : '未知'}</span>
+                                                <span>${server.max_deviation ? (server.max_deviation / 1e9).toFixed(7) + 's' : '未知'}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -442,30 +430,24 @@ class TimeService {
                                             <thead>
                                                 <tr class="bg-gray-100">
                                                     <th class="px-2 py-1 text-left">序号</th>
-                                                    <th class="px-2 py-1 text-left">时间偏移</th>
-                                                    <th class="px-2 py-1 text-left">往返延迟</th>
-                                                    <th class="px-2 py-1 text-left">时间戳</th>
                                                     <th class="px-2 py-1 text-left">状态</th>
-                                                    <th class="px-2 py-1 text-left">选中</th>
+                                                    <th class="px-2 py-1 text-left">时间戳</th>
+                                                    <th class="px-2 py-1 text-left">往返延迟</th>
+                                                    <th class="px-2 py-1 text-left">时间偏移</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 ${server.samples.map((sample, idx) => `
                                                     <tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
                                                         <td class="px-2 py-1">${idx + 1}</td>
-                                                        <td class="px-2 py-1">${this.formatNanoseconds(sample.offset)}</td>
-                                                        <td class="px-2 py-1">${this.formatNanoseconds(sample.delay)}</td>
-                                                        <td class="px-2 py-1">${new Date(sample.timestamp / 1e6).toLocaleString()}</td>
                                                         <td class="px-2 py-1">
                                                             ${sample.status === 'Success' ? 
                                                                 '<span class="text-green-600 font-medium">Success</span>' : 
                                                                 '<span class="text-red-600 font-medium">Failed</span>'}
                                                         </td>
-                                                        <td class="px-2 py-1">
-                                                            ${sample.is_selected ? 
-                                                                '<span class="text-green-600 font-medium">是</span>' : 
-                                                                '<span class="text-gray-400">否</span>'}
-                                                        </td>
+                                                        <td class="px-2 py-1">${new Date(sample.timestamp / 1e6).toLocaleString()}</td>
+                                                        <td class="px-2 py-1">${this.formatNanoseconds(sample.delay)}</td>
+                                                        <td class="px-2 py-1">${this.formatNanoseconds(sample.offset)}</td>
                                                     </tr>
                                                 `).join('')}
                                             </tbody>
@@ -522,7 +504,6 @@ class TimeService {
             document.getElementById('total-syncs').textContent = data.total_syncs;
             document.getElementById('successful-syncs').textContent = data.successful_syncs;
             document.getElementById('failed-syncs').textContent = data.failed_syncs;
-            document.getElementById('average-deviation').textContent = this.formatNanoseconds(data.average_deviation);
             document.getElementById('max-deviation').textContent = this.formatNanoseconds(data.max_deviation);
         } catch (error) {
             console.error('加载统计信息失败:', error);
@@ -577,6 +558,11 @@ class TimeService {
         } else {
             value = nanoseconds / 1000000000;
             unit = 's';
+        }
+        
+        // 对于秒单位，使用7位小数精度，格式为2.0000000
+        if (unit === 's') {
+            return `${value.toFixed(7)} ${unit}`;
         }
         
         // 对于较大的值，使用更合适的精度

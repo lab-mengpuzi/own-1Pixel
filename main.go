@@ -324,6 +324,19 @@ func main() {
 	logger.Init(_config)
 	fmt.Printf("初始化日志配置文件...[%s]\n", _config.LogPath)
 
+	// 初始化时间服务系统
+	timeService, err := timeservice.InitGlobalTimeService(_config)
+	if err != nil {
+		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败: %v\n", err))
+		fmt.Printf("初始化时间服务系统失败: %v\n", err)
+		// 时间服务系统初始化失败不影响系统启动，但会记录日志
+	}
+
+	// 无论时间服务系统是否初始化成功，都创建API实例
+	// 如果时间服务系统未初始化，API将返回降级模式响应
+	timeServiceAPI = timeservice.NewTimeServiceAPI(timeService)
+	logger.Info("main", "时间服务系统API已创建\n")
+
 	// 打开数据库连接
 	// 添加SQLite特定参数以提高并发性能
 	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.DbPath))
@@ -353,19 +366,6 @@ func main() {
 
 	// 初始化价格更新管理器
 	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
-
-	// 初始化时间服务系统
-	timeService, err := timeservice.InitGlobalTimeService(_config)
-	if err != nil {
-		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败: %v\n", err))
-		fmt.Printf("初始化时间服务系统失败: %v\n", err)
-		// 时间服务系统初始化失败不影响系统启动，但会记录日志
-	}
-
-	// 无论时间服务系统是否初始化成功，都创建API实例
-	// 如果时间服务系统未初始化，API将返回降级模式响应
-	timeServiceAPI = timeservice.NewTimeServiceAPI(timeService)
-	logger.Info("main", "时间服务系统API已创建\n")
 
 	// 检查并恢复进行中的拍卖
 	recoverActiveAuctions()
