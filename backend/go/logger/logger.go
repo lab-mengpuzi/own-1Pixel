@@ -5,7 +5,6 @@ import (
 	"os"
 	"own-1Pixel/backend/go/config"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -15,52 +14,25 @@ var (
 	mutex   sync.Mutex
 )
 
-// isValidPath 检查路径是否合法
-func isValidPath(path string) bool {
-	// 检查路径长度是否合理（Windows路径通常不超过260字符）
-	if len(path) > 260 {
-		return false
-	}
-
-	// 检查路径是否包含非法字符（Windows系统）
-	invalidChars := []string{"<", ">", ":", "\"", "|", "?", "*"}
-	for _, char := range invalidChars {
-		if strings.Contains(path, char) {
-			return false
-		}
-	}
-
-	// 检查路径是否为绝对路径
-	if !filepath.IsAbs(path) {
-		return false
-	}
-
-	return true
-}
-
 // Init 初始化日志记录器
-func Init(_config config.Config) {
-	var logPath string
-
-	// 确定使用的日志路径
-	if logPath == "" || !isValidPath(logPath) {
-		// 使用默认配置中的日志路径
-		logPath = _config.LogPath
-	}
+func Init() {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	loggerConfig := _config.Logger
 
 	// 如果日志文件未打开，则打开或创建它
 	if logFile == nil {
 		var err error
 
 		// 确保日志目录存在
-		logDir := filepath.Dir(logPath)
+		logDir := filepath.Dir(loggerConfig.Path)
 		if err = os.MkdirAll(logDir, 0755); err != nil {
 			fmt.Printf("failed to create log directory: %v\n", err)
 			return
 		}
 
 		// 打开或创建日志文件
-		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		logFile, err = os.OpenFile(loggerConfig.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			fmt.Printf("failed to open log file: %v\n", err)
 			return

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 
 	_ "modernc.org/sqlite"
@@ -92,6 +93,10 @@ func InitAuctionDatabase(db *sql.DB) error {
 	}
 
 	logger.Info("auction", "荷兰钟拍卖数据库表初始化完成\n")
+	
+	// 恢复进行中的拍卖
+	recoverActiveAuctions(db)
+	
 	return nil
 }
 
@@ -106,8 +111,12 @@ func StartAuctionPriceDecrementTimer(db *sql.DB) {
 	// 立即执行一次价格更新
 	updateActiveAuctionPrices(db)
 
-	// 设置定时器，每秒执行一次价格更新
-	auctionPriceDecrementTimer = time.AfterFunc(1*time.Second, func() {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionConfig := _config.Auction
+
+	// 设置定时器，使用配置中的默认间隔
+	auctionPriceDecrementTimer = time.AfterFunc(time.Duration(auctionConfig.DefaultDecrementInterval)*time.Second, func() {
 		updateActiveAuctionPrices(db)
 		// 递归调用，保持定时器运行
 		if isTimerRunning {
@@ -122,6 +131,29 @@ func StopAuctionPriceDecrementTimer() {
 		auctionPriceDecrementTimer.Stop()
 	}
 	isTimerRunning = false
+}
+
+// 恢复进行中的拍卖
+func recoverActiveAuctions(db *sql.DB) {
+	logger.Info("auction", "检查并恢复进行中的拍卖...\n")
+
+	// 获取所有活跃拍卖
+	activeAuctions, err := GetActiveAuctions(db)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("获取活跃拍卖失败: %v\n", err))
+		return
+	}
+
+	if len(activeAuctions) == 0 {
+		logger.Info("auction", "没有进行中的拍卖需要恢复\n")
+		return
+	}
+
+	logger.Info("auction", fmt.Sprintf("发现 %d 个进行中的拍卖，开始恢复...\n", len(activeAuctions)))
+
+	// 启动价格递减定时器
+	StartAuctionPriceDecrementTimer(db)
+	logger.Info("auction", "价格递减定时器已启动，将自动更新活跃拍卖价格\n")
 }
 
 // 更新活跃拍卖的价格

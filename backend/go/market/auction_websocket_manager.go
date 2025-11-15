@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 
 	"github.com/gorilla/websocket"
@@ -68,6 +69,10 @@ var auctionWSUpgrader = websocket.Upgrader{
 
 // 处理WebSocket连接
 func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.ResponseWriter, r *http.Request) {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionWebSocket := _config.AuctionWebSocket
+
 	// 升级HTTP连接到WebSocket
 	conn, err := auctionWSUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -76,11 +81,11 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 	}
 
 	// 设置连接参数
-	conn.SetReadLimit(512)                                 // 限制读取消息大小
-	conn.SetReadDeadline(time.Now().Add(45 * time.Second)) // 设置读取超时，比心跳间隔长
+	conn.SetReadLimit(int64(auctionWebSocket.ReadLimit))               // 限制读取消息大小
+	conn.SetReadDeadline(time.Now().Add(auctionWebSocket.ReadTimeout)) // 设置读取超时，比心跳间隔长
 	conn.SetPongHandler(func(string) error {
 		logger.Info("websocket", "收到pong响应\n")
-		conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(auctionWebSocket.ReadTimeout))
 		return nil
 	})
 
@@ -129,7 +134,13 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 
 // 心跳检测循环
 func (auctionWSManager *AuctionWSManager) auctionHeartbeatLoop(conn *websocket.Conn) {
-	ticker := time.NewTicker(25 * time.Second) // 每25秒发送一次心跳，比读取超时提前一些
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionWebSocket := _config.AuctionWebSocket
+
+	// 设置心跳间隔，比读取超时提前一些
+	heartbeatInterval := auctionWebSocket.PingInterval
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {

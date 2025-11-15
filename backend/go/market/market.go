@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 
 	_ "modernc.org/sqlite"
@@ -50,6 +51,10 @@ type MarketItems struct {
 
 // 初始化市场数据库
 func InitMarketDatabase(db *sql.DB) error {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	marketConfig := _config.Market
+
 	logger.Info("market", "初始化市场数据库\n")
 
 	// 创建市场参数表
@@ -109,7 +114,8 @@ func InitMarketDatabase(db *sql.DB) error {
 	}
 
 	if count == 0 {
-		_, err = db.Exec("INSERT INTO market_params (balance_range, price_fluctuation, max_price_change) VALUES (1.0, 1.0, 1.0)")
+		_, err = db.Exec("INSERT INTO market_params (balance_range, price_fluctuation, max_price_change) VALUES (?, ?, ?)",
+			marketConfig.DefaultBalance, marketConfig.DefaultFluctuation, marketConfig.DefaultMaxChange)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("初始化市场参数记录失败: %v\n", err))
 			return err
@@ -143,7 +149,8 @@ func InitMarketDatabase(db *sql.DB) error {
 		var appleCount int
 		db.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'apple'").Scan(&appleCount)
 		if appleCount == 0 {
-			_, err = db.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('apple', 1.0, 0, 1.0)")
+			_, err = db.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('apple', ?, 0, ?)",
+				marketConfig.InitialApplePrice, marketConfig.InitialApplePrice)
 			if err != nil {
 				logger.Info("market", fmt.Sprintf("初始化苹果物品记录失败: %v\n", err))
 				return err
@@ -154,7 +161,8 @@ func InitMarketDatabase(db *sql.DB) error {
 		var woodCount int
 		db.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'wood'").Scan(&woodCount)
 		if woodCount == 0 {
-			_, err = db.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('wood', 5.0, 0, 5.0)")
+			_, err = db.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('wood', ?, 0, ?)",
+				marketConfig.InitialWoodPrice, marketConfig.InitialWoodPrice)
 			if err != nil {
 				logger.Info("market", fmt.Sprintf("初始化木材物品记录失败: %v\n", err))
 				return err
