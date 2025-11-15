@@ -27,24 +27,24 @@ var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新�
 var timeServiceAPI *timeservice.TimeServiceAPI                  // 时间服务系统API
 
 // 初始化数据库
-func initDatabase(_config config.Config) error {
-	err := cash.InitDatabase(db, _config.DbPath)
+func initDatabase() error {
+	err := cash.InitDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化市场数据库
 	err = market.InitMarketDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化荷兰钟拍卖数据库
 	err = market.InitAuctionDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败 -> %v\n", err))
 		return err
 	}
 
@@ -279,57 +279,25 @@ func reactivateAuction(w http.ResponseWriter, r *http.Request) {
 	market.ReactivateAuction(db, w, r)
 }
 
-// 恢复进行中的拍卖
-func recoverActiveAuctions() {
-	logger.Info("main", "检查并恢复进行中的拍卖...\n")
-
-	// 获取所有活跃拍卖
-	activeAuctions, err := market.GetActiveAuctions(db)
-	if err != nil {
-		logger.Info("main", fmt.Sprintf("获取活跃拍卖失败: %v\n", err))
-		return
-	}
-
-	if len(activeAuctions) == 0 {
-		logger.Info("main", "没有进行中的拍卖需要恢复\n")
-		return
-	}
-
-	logger.Info("main", fmt.Sprintf("发现 %d 个进行中的拍卖，开始恢复...\n", len(activeAuctions)))
-
-	// 启动价格更新管理器
-	if auctionPriceUpdateManager != nil {
-		auctionPriceUpdateManager.StartAuctionWSPriceUpdateManager()
-		logger.Info("main", "价格更新管理器已启动，将自动更新活跃拍卖价格\n")
-	}
-
-	// 为每个活跃拍卖恢复价格更新缓存
-	for _, auction := range activeAuctions {
-		if auctionPriceUpdateManager != nil {
-			// 将活跃拍卖添加到价格更新缓存
-			auctionPriceUpdateManager.UpdateAuctionPriceCache(auction.ID, auction.CurrentPrice)
-			logger.Info("main", fmt.Sprintf("已恢复拍卖 ID: %d, 当前价格: %.2f\n", auction.ID, auction.CurrentPrice))
-		}
-	}
-}
-
 func main() {
 	var err error
 
-	// 获取配置对象
+	// 初始化全局配置实例
 	_config := config.InitConfig()
 	fmt.Printf("初始化配置文件...[%s]\n", _config.ConfigPath)
 
+	// 获取全局配置实例
+	mainConfig := _config.Main
+
 	// 初始化日志记录器
-	logger.Init(_config)
-	fmt.Printf("初始化日志配置文件...[%s]\n", _config.LogPath)
+	logger.Init()
+	fmt.Printf("初始化日志配置文件...[%s]\n", _config.Logger.Path)
 
 	// 初始化时间服务系统
-	timeService, err := timeservice.InitGlobalTimeService(_config)
+	timeService, err := timeservice.InitGlobalTimeService()
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败: %v\n", err))
-		fmt.Printf("初始化时间服务系统失败: %v\n", err)
-		// 时间服务系统初始化失败不影响系统启动，但会记录日志
+		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败 -> %v\n", err))
+		fmt.Printf("初始化时间服务系统失败 -> %v\n", err)
 	}
 
 	// 无论时间服务系统是否初始化成功，都创建API实例
@@ -339,10 +307,10 @@ func main() {
 
 	// 打开数据库连接
 	// 添加SQLite特定参数以提高并发性能
-	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.DbPath))
+	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.Cash.DbPath))
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("打开数据库失败: %v\n", err))
-		fmt.Printf("打开数据库失败: %v", err)
+		logger.Info("main", fmt.Sprintf("打开数据库失败 -> %v\n", err))
+		fmt.Printf("打开数据库失败 -> %v\n", err)
 		return
 	}
 
@@ -352,14 +320,14 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute) // 设置连接最大生存时间
 
 	// 初始化数据库
-	err = initDatabase(_config)
+	err = initDatabase()
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("初始化数据库失败: %v\n", err))
-		fmt.Printf("初始化数据库失败: %v", err)
+		logger.Info("main", fmt.Sprintf("初始化数据库失败 -> %v\n", err))
+		fmt.Printf("初始化数据库失败 -> %v\n", err)
 		return
 	}
 	defer db.Close()
-	fmt.Printf("初始化数据库配置文件...[%s]\n", _config.DbPath)
+	fmt.Printf("初始化数据库配置文件...[%s]\n", _config.Cash.DbPath)
 
 	// 初始化WebSocket管理器
 	auctionWSManager = market.InitAuctionWSManager(db)
@@ -367,14 +335,11 @@ func main() {
 	// 初始化价格更新管理器
 	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
 
-	// 检查并恢复进行中的拍卖
-	recoverActiveAuctions()
-
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("处理静态资源二进制化错误: %v\n", err))
-		fmt.Printf("处理静态资源二进制化错误: %v\n", err)
+		logger.Info("main", fmt.Sprintf("处理静态资源二进制化错误 -> %v\n", err))
+		fmt.Printf("处理静态资源二进制化错误 -> %v\n", err)
 		return
 	}
 
@@ -430,26 +395,24 @@ func main() {
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
 
 	// 时间服务系统API端点
-	if timeServiceAPI != nil {
-		http.HandleFunc("/api/timeservice/time-info", timeServiceAPI.GetTimeInfo)
-		http.HandleFunc("/api/timeservice/status", timeServiceAPI.GetStatus)
-		http.HandleFunc("/api/timeservice/stats", timeServiceAPI.GetStats)
-		http.HandleFunc("/api/timeservice/circuit-breaker", timeServiceAPI.GetCircuitBreakerState)
-		http.HandleFunc("/api/timeservice/ntp-pool", timeServiceAPI.GetNTPPool)
-	}
+	http.HandleFunc("/api/timeservice/time-info", timeServiceAPI.GetTimeInfo)
+	http.HandleFunc("/api/timeservice/status", timeServiceAPI.GetStatus)
+	http.HandleFunc("/api/timeservice/stats", timeServiceAPI.GetStats)
+	http.HandleFunc("/api/timeservice/circuit-breaker", timeServiceAPI.GetCircuitBreakerState)
+	http.HandleFunc("/api/timeservice/ntp-pool", timeServiceAPI.GetNTPPool)
 
 	// 记录服务器启动日志
-	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", _config.Port))
-	logger.Info("main", fmt.Sprintf("访问 http://%s:%d 或 http://localhost:%d\n", _config.Host, _config.Port, _config.Port))
+	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", mainConfig.Port))
+	logger.Info("main", fmt.Sprintf("访问 http://%s:%d 或 http://localhost:%d\n", mainConfig.Host, mainConfig.Port, mainConfig.Port))
 
 	// 启动服务器
-	fmt.Printf("own-1Pixel 启动服务器 %d\n", _config.Port)
-	fmt.Printf("访问 http://%s:%d 或 http://localhost:%d\n", _config.Host, _config.Port, _config.Port)
+	fmt.Printf("own-1Pixel 启动服务器 %d\n", mainConfig.Port)
+	fmt.Printf("访问 http://%s:%d 或 http://localhost:%d\n", mainConfig.Host, mainConfig.Port, mainConfig.Port)
 
-	err = http.ListenAndServe(fmt.Sprintf("%s:%d", _config.Host, _config.Port), nil)
+	err = http.ListenAndServe(fmt.Sprintf("%s:%d", mainConfig.Host, mainConfig.Port), nil)
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("启动服务器错误: %v\n", err))
-		fmt.Printf("启动服务器错误: %v\n", err)
+		logger.Info("main", fmt.Sprintf("启动服务器错误 -> %v\n", err))
+		fmt.Printf("启动服务器错误 -> %v\n", err)
 	}
 
 	// 关闭日志系统

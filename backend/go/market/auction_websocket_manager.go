@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 
 	"github.com/gorilla/websocket"
 )
@@ -68,6 +70,10 @@ var auctionWSUpgrader = websocket.Upgrader{
 
 // 处理WebSocket连接
 func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.ResponseWriter, r *http.Request) {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionWebSocketConfig := _config.AuctionWebSocket
+
 	// 升级HTTP连接到WebSocket
 	conn, err := auctionWSUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -76,11 +82,12 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 	}
 
 	// 设置连接参数
-	conn.SetReadLimit(512)                                 // 限制读取消息大小
-	conn.SetReadDeadline(time.Now().Add(45 * time.Second)) // 设置读取超时，比心跳间隔长
+	conn.SetReadLimit(int64(auctionWebSocketConfig.ReadLimit))                        // 限制读取消息大小
+	conn.SetReadDeadline(timeservice.Now().Add(auctionWebSocketConfig.ReadTimeout))   // 设置读取超时，比心跳间隔长
+	conn.SetWriteDeadline(timeservice.Now().Add(auctionWebSocketConfig.WriteTimeout)) // 设置写入超时
 	conn.SetPongHandler(func(string) error {
 		logger.Info("websocket", "收到pong响应\n")
-		conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		conn.SetReadDeadline(timeservice.Now().Add(auctionWebSocketConfig.ReadTimeout))
 		return nil
 	})
 
@@ -129,7 +136,13 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 
 // 心跳检测循环
 func (auctionWSManager *AuctionWSManager) auctionHeartbeatLoop(conn *websocket.Conn) {
-	ticker := time.NewTicker(25 * time.Second) // 每25秒发送一次心跳，比读取超时提前一些
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionWebSocket := _config.AuctionWebSocket
+
+	// 设置心跳间隔，比读取超时提前一些
+	heartbeatInterval := auctionWebSocket.PingInterval
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -161,7 +174,7 @@ func (auctionWSManager *AuctionWSManager) handleAuctionClientMessage(conn *webso
 		auctionWSManager.sendActiveAuctions(conn)
 	case "ping":
 		// 处理客户端发送的ping消息，回复pong
-		now := time.Now()
+		now := timeservice.Now()
 		pongMsg := AuctionWSMessage{
 			Type:      "pong",
 			Data:      nil,
@@ -177,7 +190,7 @@ func (auctionWSManager *AuctionWSManager) handleAuctionClientMessage(conn *webso
 		}
 	case "connection_check":
 		// 处理连接健康检查，简单回复确认
-		now := time.Now()
+		now := timeservice.Now()
 		checkMsg := AuctionWSMessage{
 			Type:      "connection_check_response",
 			Data:      nil,
@@ -202,7 +215,7 @@ func (auctionWSManager *AuctionWSManager) sendActiveAuctions(conn *websocket.Con
 		return
 	}
 
-	now := time.Now()
+	now := timeservice.Now()
 	msg := AuctionWSMessage{
 		Type:      "auction_list",
 		Data:      auctions,
@@ -210,7 +223,7 @@ func (auctionWSManager *AuctionWSManager) sendActiveAuctions(conn *websocket.Con
 		SendTime:  now,
 	}
 
-	startTime := time.Now()
+	startTime := timeservice.Now()
 	err = conn.WriteJSON(msg)
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("发送拍卖列表失败: %v\n", err))
@@ -230,7 +243,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionDetails(conn *websocket.Con
 		return
 	}
 
-	now := time.Now()
+	now := timeservice.Now()
 	msg := AuctionWSMessage{
 		Type:      "auction_details",
 		Data:      auction,
@@ -238,7 +251,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionDetails(conn *websocket.Con
 		SendTime:  now,
 	}
 
-	startTime := time.Now()
+	startTime := timeservice.Now()
 	err = conn.WriteJSON(msg)
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("发送拍卖详情失败: %v\n", err))
@@ -299,7 +312,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionWSBidResult(conn *websocket
 		Quantity: quantity,
 	}
 
-	now := time.Now()
+	now := timeservice.Now()
 	msg := AuctionWSMessage{
 		Type:      "bid_result",
 		Data:      result,
@@ -307,7 +320,7 @@ func (auctionWSManager *AuctionWSManager) sendAuctionWSBidResult(conn *websocket
 		SendTime:  now,
 	}
 
-	startTime := time.Now()
+	startTime := timeservice.Now()
 	err := conn.WriteJSON(msg)
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("发送竞价结果失败: %v\n", err))
@@ -326,7 +339,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 		Action:  action,
 	}
 
-	now := time.Now()
+	now := timeservice.Now()
 	msg := AuctionWSMessage{
 		Type:      "auction_update",
 		Data:      update,
@@ -347,7 +360,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 	var failedConnections []*websocket.Conn
 
 	// 记录广播开始时间
-	broadcastStartTime := time.Now()
+	broadcastStartTime := timeservice.Now()
 
 	for _, conn := range connections {
 		// 检查连接是否还在管理器中
@@ -356,10 +369,11 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 		}
 
 		// 设置写入超时
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		_config := config.GetConfig()
+		conn.SetWriteDeadline(timeservice.Now().Add(time.Duration(_config.AuctionWebSocket.WriteTimeout)))
 
 		// 记录单个连接发送时间
-		sendStartTime := time.Now()
+		sendStartTime := timeservice.Now()
 		err := conn.WriteJSON(msg)
 		sendDuration := time.Since(sendStartTime)
 
@@ -387,6 +401,10 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 
 // 广播价格更新
 func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionID int, oldPrice, newPrice float64, timeRemaining int) {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionWebSocketConfig := _config.AuctionWebSocket
+
 	update := AuctionPriceUpdateMessage{
 		AuctionID:     auctionID,
 		OldPrice:      oldPrice,
@@ -394,7 +412,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 		TimeRemaining: timeRemaining,
 	}
 
-	now := time.Now()
+	now := timeservice.Now()
 	msg := AuctionWSMessage{
 		Type:      "auction_price_update",
 		Data:      update,
@@ -415,7 +433,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 	var failedConnections []*websocket.Conn
 
 	// 记录广播开始时间
-	broadcastStartTime := time.Now()
+	broadcastStartTime := timeservice.Now()
 
 	for _, conn := range connections {
 		// 检查连接是否还在管理器中
@@ -424,10 +442,10 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 		}
 
 		// 设置写入超时
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		conn.SetWriteDeadline(timeservice.Now().Add(time.Duration(auctionWebSocketConfig.WriteTimeout)))
 
 		// 记录单个连接发送时间
-		sendStartTime := time.Now()
+		sendStartTime := timeservice.Now()
 		err := conn.WriteJSON(msg)
 		sendDuration := time.Since(sendStartTime)
 

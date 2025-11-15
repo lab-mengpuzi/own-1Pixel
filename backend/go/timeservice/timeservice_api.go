@@ -278,14 +278,12 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	// 获取NTP服务器列表
 	ntpServers := api.timeService.GetNTPServers()
 
-	// 转换为响应格式
-	var ntpServerInfos []TimeServiceANTPServer
-	for _, server := range ntpServers {
-		// 查询服务器详细信息
-		_, err := api.timeService.QueryNTPServerDetailed(server)
+	// 获取lastNTPSamples数据
+	lastSamples := api.timeService.GetLastNTPSamples()
 
-		// 获取该服务器的样本数据
-		lastSamples := api.timeService.GetLastNTPSamples()
+	// 转换为响应格式
+	var ntpServerResponse []TimeServiceANTPServer
+	for _, server := range ntpServers {
 		var samples []TimeServiceANTPSample
 		if serverSamples, exists := lastSamples[server.Address]; exists {
 			// 转换为API响应格式
@@ -300,32 +298,24 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 基本信息始终填充
-		serverInfo := TimeServiceANTPServer{
+		serverResponse := TimeServiceANTPServer{
 			Name:         server.Name,
 			Address:      server.Address,
 			Weight:       server.Weight,
 			IsDomestic:   server.IsDomestic,
 			MaxDeviation: server.MaxDeviation,
-			IsActive:     true, // 默认所有服务器都是活跃的，实际应用中可以根据状态判断
+			IsActive:     len(samples) > 0, // 如果有样本数据，则认为服务器是活跃的
 			LastSyncTime: time.Now().Format("2006-01-02 15:04:05.000000000"),
 			Samples:      samples,           // 添加样本数据
 			IsSelected:   server.IsSelected, // 添加IsSelected字段
 		}
 
-		// 如果查询成功，填充基本信息
-		if err == nil {
-			// 只保留基本信息，不填充已移除的字段
-		} else {
-			// 查询失败，设置默认值
-			serverInfo.IsActive = false
-		}
-
-		ntpServerInfos = append(ntpServerInfos, serverInfo)
+		ntpServerResponse = append(ntpServerResponse, serverResponse)
 	}
 
 	// 构建响应
 	response := TimeServiceANTPPoolResponse{
-		NTPServers: ntpServerInfos,
+		NTPServers: ntpServerResponse,
 	}
 
 	// 设置响应头

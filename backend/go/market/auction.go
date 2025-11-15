@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 
 	_ "modernc.org/sqlite"
 )
@@ -92,6 +94,10 @@ func InitAuctionDatabase(db *sql.DB) error {
 	}
 
 	logger.Info("auction", "荷兰钟拍卖数据库表初始化完成\n")
+
+	// 恢复进行中的拍卖
+	recoverActiveAuctions(db)
+
 	return nil
 }
 
@@ -106,8 +112,12 @@ func StartAuctionPriceDecrementTimer(db *sql.DB) {
 	// 立即执行一次价格更新
 	updateActiveAuctionPrices(db)
 
-	// 设置定时器，每秒执行一次价格更新
-	auctionPriceDecrementTimer = time.AfterFunc(1*time.Second, func() {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	auctionConfig := _config.Auction
+
+	// 设置定时器，使用配置中的默认间隔
+	auctionPriceDecrementTimer = time.AfterFunc(time.Duration(auctionConfig.DefaultDecrementInterval)*time.Second, func() {
 		updateActiveAuctionPrices(db)
 		// 递归调用，保持定时器运行
 		if isTimerRunning {
@@ -122,6 +132,29 @@ func StopAuctionPriceDecrementTimer() {
 		auctionPriceDecrementTimer.Stop()
 	}
 	isTimerRunning = false
+}
+
+// 恢复进行中的拍卖
+func recoverActiveAuctions(db *sql.DB) {
+	logger.Info("auction", "检查并恢复进行中的拍卖...\n")
+
+	// 获取所有活跃拍卖
+	activeAuctions, err := GetActiveAuctions(db)
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("获取活跃拍卖失败: %v\n", err))
+		return
+	}
+
+	if len(activeAuctions) == 0 {
+		logger.Info("auction", "没有进行中的拍卖需要恢复\n")
+		return
+	}
+
+	logger.Info("auction", fmt.Sprintf("发现 %d 个进行中的拍卖，开始恢复...\n", len(activeAuctions)))
+
+	// 启动价格递减定时器
+	StartAuctionPriceDecrementTimer(db)
+	logger.Info("auction", "价格递减定时器已启动，将自动更新活跃拍卖价格\n")
 }
 
 // 更新活跃拍卖的价格
@@ -858,7 +891,7 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置开始时间和状态
-	now := time.Now()
+	now := timeservice.Now()
 	startTimeValue := now
 	endTimeValue := now.Add(time.Duration(auction.DecrementInterval) * time.Second * time.Duration(int((auction.InitialPrice-auction.MinPrice)/auction.PriceDecrement)))
 
@@ -1084,7 +1117,7 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 检查拍卖是否已结束
-	if auction.EndTime != nil && time.Now().After(*auction.EndTime) {
+	if auction.EndTime != nil && timeservice.Now().After(*auction.EndTime) {
 		// 更新拍卖状态为已完成
 		_, err = tx.Exec("UPDATE auctions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", bid.AuctionID)
 		if err != nil {
@@ -1258,7 +1291,7 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 隐私数据
 	_, err = tx.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		time.Now(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType))
+		timeservice.Now(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType))
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -1734,7 +1767,7 @@ func UpdateAuctionPrices(db *sql.DB) {
 	}
 	defer rows.Close()
 
-	now := time.Now()
+	now := timeservice.Now()
 	updatedCount := 0
 
 	for rows.Next() {
@@ -1915,7 +1948,7 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 	}
 
 	// 记录竞价
-	now := time.Now()
+	now := timeservice.Now()
 	result, err := tx.Exec(`
 		INSERT INTO auction_bids (auction_id, user_id, price, quantity, status, created_at) 
 		VALUES (?, ?, ?, ?, 'accepted', ?)`,

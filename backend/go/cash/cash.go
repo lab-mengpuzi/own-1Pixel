@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,19 +40,23 @@ type Balance struct {
 }
 
 // 初始化数据库
-func InitDatabase(db *sql.DB, dbPath string) error {
-	logger.Info("cash", fmt.Sprintf("初始化现金数据库，路径: %s\n", dbPath))
+func InitDatabase(db *sql.DB) error {
+	// 获取全局配置实例
+	_config := config.GetConfig()
+	cashConfig := _config.Cash
+
+	logger.Info("cash", fmt.Sprintf("初始化现金数据库，路径: %s\n", cashConfig.DbPath))
 	var err error
 
 	// 确保数据库目录存在
-	dbDir := filepath.Dir(dbPath)
+	dbDir := filepath.Dir(cashConfig.DbPath)
 	if _, dirCheckErr := os.Stat(dbDir); os.IsNotExist(dirCheckErr) {
 		os.MkdirAll(dbDir, 0755)
 	}
 
-	if _, dbCheckErr := os.Stat(dbPath); dbCheckErr == nil {
+	if _, dbCheckErr := os.Stat(cashConfig.DbPath); dbCheckErr == nil {
 		// 数据库文件存在，检查表结构是否匹配
-		tempDB, dbOpenErr := sql.Open("sqlite", dbPath)
+		tempDB, dbOpenErr := sql.Open("sqlite", cashConfig.DbPath)
 		if dbOpenErr != nil {
 			return dbOpenErr
 		}
@@ -121,11 +127,11 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 
 			if needsMigration {
 				// 备份旧数据库文件
-				backupTime := time.Now().Format("20060102_150405")
+				backupTime := timeservice.Now().Format("20060102_150405")
 				backupPath := filepath.Join(dbDir, fmt.Sprintf("cash_backup_%s.db", backupTime))
 
 				// 复制旧数据库文件到备份文件
-				err = copyFile(dbPath, backupPath)
+				err = copyFile(cashConfig.DbPath, backupPath)
 				if err != nil {
 					return fmt.Errorf("备份数据库文件失败: %v", err)
 				}
@@ -133,7 +139,7 @@ func InitDatabase(db *sql.DB, dbPath string) error {
 				fmt.Printf("旧数据库文件已备份为: %s\n", backupPath)
 
 				// 删除旧数据库文件，以便创建新的
-				err = os.Remove(dbPath)
+				err = os.Remove(cashConfig.DbPath)
 				if err != nil {
 					return fmt.Errorf("删除旧数据库文件失败: %v", err)
 				}
@@ -236,7 +242,7 @@ func copyFile(src, dst string) error {
 // 获取当前余额
 func GetBalance(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	logger.Info("cash", "获取账户余额请求\n")
 	var balance Balance
 	err := db.QueryRow("SELECT id, amount, updated_at FROM balance ORDER BY id DESC LIMIT 1").Scan(&balance.ID, &balance.Amount, &balance.UpdatedAt)
@@ -271,7 +277,7 @@ func UpdateBalance(db *sql.DB, amount float64) error {
 // 获取所有交易记录
 func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	logger.Info("cash", "获取交易记录请求\n")
 	// 获取所有交易记录，按交易时间升序排列以便计算余额
 	rows, err := db.Query("SELECT id, transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at FROM transactions ORDER BY transaction_time ASC")
@@ -334,7 +340,7 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 // 添加交易记录
 func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if r.Method != "POST" {
 		logger.Info("cash", fmt.Sprintf("添加交易记录请求失败，不支持的请求方法: %s\n", r.Method))
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -380,8 +386,8 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	t.IncomeAmount = tempT.IncomeAmount
 	t.Note = tempT.Note
 
-	// 使用当前时间并格式化为"年-月-日 时:分:秒"
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
+	// 使用时间服务提供的可信时间并格式化为"年-月-日 时:分:秒"
+	currentTime := timeservice.Now().Format("2006-01-02 15:04:05")
 	t.TransactionTime, _ = time.Parse("2006-01-02 15:04:05", currentTime)
 
 	// 获取当前余额
