@@ -12,6 +12,7 @@ import (
 
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 
 	_ "modernc.org/sqlite"
 )
@@ -126,7 +127,7 @@ func InitDatabase(db *sql.DB) error {
 
 			if needsMigration {
 				// 备份旧数据库文件
-				backupTime := time.Now().Format("20060102_150405")
+				backupTime := timeservice.Now().Format("20060102_150405")
 				backupPath := filepath.Join(dbDir, fmt.Sprintf("cash_backup_%s.db", backupTime))
 
 				// 复制旧数据库文件到备份文件
@@ -385,8 +386,8 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	t.IncomeAmount = tempT.IncomeAmount
 	t.Note = tempT.Note
 
-	// 使用当前时间并格式化为"年-月-日 时:分:秒"
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
+	// 使用时间服务提供的可信时间并格式化为"年-月-日 时:分:秒"
+	currentTime := timeservice.Now().Format("2006-01-02 15:04:05")
 	t.TransactionTime, _ = time.Parse("2006-01-02 15:04:05", currentTime)
 
 	// 获取当前余额

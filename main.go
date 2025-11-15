@@ -30,21 +30,21 @@ var timeServiceAPI *timeservice.TimeServiceAPI                  // 时间服务�
 func initDatabase() error {
 	err := cash.InitDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化市场数据库
 	err = market.InitMarketDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化荷兰钟拍卖数据库
 	err = market.InitAuctionDatabase(db)
 	if err != nil {
-		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败: %v\n", err))
+		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败 -> %v\n", err))
 		return err
 	}
 
@@ -294,11 +294,10 @@ func main() {
 	fmt.Printf("初始化日志配置文件...[%s]\n", _config.Logger.Path)
 
 	// 初始化时间服务系统
-	timeService, err := timeservice.InitGlobalTimeService(_config)
+	timeService, err := timeservice.InitGlobalTimeService()
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败: %v\n", err))
-		fmt.Printf("初始化时间服务系统失败: %v\n", err)
-		// 时间服务系统初始化失败不影响系统启动，但会记录日志
+		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败 -> %v\n", err))
+		fmt.Printf("初始化时间服务系统失败 -> %v\n", err)
 	}
 
 	// 无论时间服务系统是否初始化成功，都创建API实例
@@ -310,8 +309,8 @@ func main() {
 	// 添加SQLite特定参数以提高并发性能
 	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.Cash.DbPath))
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("打开数据库失败: %v\n", err))
-		fmt.Printf("打开数据库失败: %v", err)
+		logger.Info("main", fmt.Sprintf("打开数据库失败 -> %v\n", err))
+		fmt.Printf("打开数据库失败 -> %v\n", err)
 		return
 	}
 
@@ -323,8 +322,8 @@ func main() {
 	// 初始化数据库
 	err = initDatabase()
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("初始化数据库失败: %v\n", err))
-		fmt.Printf("初始化数据库失败: %v", err)
+		logger.Info("main", fmt.Sprintf("初始化数据库失败 -> %v\n", err))
+		fmt.Printf("初始化数据库失败 -> %v\n", err)
 		return
 	}
 	defer db.Close()
@@ -339,8 +338,8 @@ func main() {
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("处理静态资源二进制化错误: %v\n", err))
-		fmt.Printf("处理静态资源二进制化错误: %v\n", err)
+		logger.Info("main", fmt.Sprintf("处理静态资源二进制化错误 -> %v\n", err))
+		fmt.Printf("处理静态资源二进制化错误 -> %v\n", err)
 		return
 	}
 
@@ -412,8 +411,8 @@ func main() {
 
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", mainConfig.Host, mainConfig.Port), nil)
 	if err != nil {
-		logger.Info("main", fmt.Sprintf("启动服务器错误: %v\n", err))
-		fmt.Printf("启动服务器错误: %v\n", err)
+		logger.Info("main", fmt.Sprintf("启动服务器错误 -> %v\n", err))
+		fmt.Printf("启动服务器错误 -> %v\n", err)
 	}
 
 	// 关闭日志系统

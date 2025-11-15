@@ -8,6 +8,7 @@ import (
 
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 )
 
 // 拍卖缓存项
@@ -178,7 +179,7 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionCache
 	auctionWSPriceUpdateManager.cacheMutex.Lock()
 	defer auctionWSPriceUpdateManager.cacheMutex.Unlock()
 
-	now := time.Now()
+	now := timeservice.Now()
 
 	// 创建当前活跃拍卖ID的映射
 	activeAuctionIDs := make(map[int]bool)
@@ -215,7 +216,7 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) shouldUpdateAuctio
 	auctionWSPriceUpdateManager.cacheMutex.RLock()
 	defer auctionWSPriceUpdateManager.cacheMutex.RUnlock()
 
-	now := time.Now()
+	now := timeservice.Now()
 
 	// 如果拍卖不在缓存中，需要更新
 	cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auction.ID]
@@ -326,18 +327,18 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateCacheAfterPr
 
 	if cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; exists {
 		cacheItem.LastPrice = newPrice
-		cacheItem.LastUpdate = time.Now()
+		cacheItem.LastUpdate = timeservice.Now()
 
 		// 如果拍卖已完成，设置下次更新时间为很久以后
 		if isCompleted {
-			cacheItem.NextUpdate = time.Now().Add(24 * time.Hour)
+			cacheItem.NextUpdate = timeservice.Now().Add(24 * time.Hour)
 		} else {
 			// 根据拍卖的递减间隔设置下次更新时间
 			if cacheItem.Auction != nil {
-				cacheItem.NextUpdate = time.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
+				cacheItem.NextUpdate = timeservice.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
 			} else {
 				// 默认1秒后更新
-				cacheItem.NextUpdate = time.Now().Add(time.Second)
+				cacheItem.NextUpdate = timeservice.Now().Add(time.Second)
 			}
 		}
 	}
@@ -351,10 +352,10 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateCacheNextUpd
 	if cacheItem, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; exists {
 		// 根据拍卖的递减间隔设置下次更新时间
 		if cacheItem.Auction != nil {
-			cacheItem.NextUpdate = time.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
+			cacheItem.NextUpdate = timeservice.Now().Add(time.Duration(cacheItem.Auction.DecrementInterval/2) * time.Second)
 		} else {
 			// 默认1秒后更新
-			cacheItem.NextUpdate = time.Now().Add(time.Second)
+			cacheItem.NextUpdate = timeservice.Now().Add(time.Second)
 		}
 	}
 }
@@ -400,8 +401,8 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) UpdateAuctionPrice
 	// 如果拍卖不在缓存中，添加到缓存
 	if _, exists := auctionWSPriceUpdateManager.auctionCache[auctionID]; !exists {
 		auctionWSPriceUpdateManager.auctionCache[auctionID] = &AuctionCacheItem{
-			LastUpdate:   time.Now(),
-			NextUpdate:   time.Now(),
+			LastUpdate:   timeservice.Now(),
+			NextUpdate:   timeservice.Now(),
 			LastPrice:    currentPrice,
 			NeedsRefresh: true,
 		}
@@ -409,6 +410,6 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) UpdateAuctionPrice
 		// 更新缓存中的价格信息
 		cacheItem := auctionWSPriceUpdateManager.auctionCache[auctionID]
 		cacheItem.LastPrice = currentPrice
-		cacheItem.LastUpdate = time.Now()
+		cacheItem.LastUpdate = timeservice.Now()
 	}
 }

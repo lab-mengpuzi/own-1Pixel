@@ -9,6 +9,7 @@ import (
 
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
+	"own-1Pixel/backend/go/timeservice"
 
 	_ "modernc.org/sqlite"
 )
@@ -93,10 +94,10 @@ func InitAuctionDatabase(db *sql.DB) error {
 	}
 
 	logger.Info("auction", "荷兰钟拍卖数据库表初始化完成\n")
-	
+
 	// 恢复进行中的拍卖
 	recoverActiveAuctions(db)
-	
+
 	return nil
 }
 
@@ -890,7 +891,7 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置开始时间和状态
-	now := time.Now()
+	now := timeservice.Now()
 	startTimeValue := now
 	endTimeValue := now.Add(time.Duration(auction.DecrementInterval) * time.Second * time.Duration(int((auction.InitialPrice-auction.MinPrice)/auction.PriceDecrement)))
 
@@ -1116,7 +1117,7 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 检查拍卖是否已结束
-	if auction.EndTime != nil && time.Now().After(*auction.EndTime) {
+	if auction.EndTime != nil && timeservice.Now().After(*auction.EndTime) {
 		// 更新拍卖状态为已完成
 		_, err = tx.Exec("UPDATE auctions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", bid.AuctionID)
 		if err != nil {
@@ -1290,7 +1291,7 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 隐私数据
 	_, err = tx.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		time.Now(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType))
+		timeservice.Now(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType))
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -1766,7 +1767,7 @@ func UpdateAuctionPrices(db *sql.DB) {
 	}
 	defer rows.Close()
 
-	now := time.Now()
+	now := timeservice.Now()
 	updatedCount := 0
 
 	for rows.Next() {
@@ -1947,7 +1948,7 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 	}
 
 	// 记录竞价
-	now := time.Now()
+	now := timeservice.Now()
 	result, err := tx.Exec(`
 		INSERT INTO auction_bids (auction_id, user_id, price, quantity, status, created_at) 
 		VALUES (?, ?, ?, ?, 'accepted', ?)`,

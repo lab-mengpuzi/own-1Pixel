@@ -56,14 +56,16 @@ type AuctionWebSocketConfig struct {
 	ReadLimit    int           `json:"readLimit"`    // 读取消息大小限制
 	ReadTimeout  time.Duration `json:"readTimeout"`  // 读取超时时间
 	PingInterval time.Duration `json:"pingInterval"` // 心跳间隔
+	WriteTimeout time.Duration `json:"writeTimeout"` // 写入超时时间
 }
 
 // TimeServiceConfig 时间服务配置
 type TimeServiceConfig struct {
-	SampleCount      int                    `json:"sampleCount"`      // 获取样本数量
-	SyncInterval     time.Duration          `json:"syncInterval"`     // 同步间隔
-	MaxDeviation     int64                  `json:"maxDeviation"`     // 最大允许偏差(纳秒)
 	FailureThreshold int64                  `json:"failureThreshold"` // 失败阈值
+	SampleCount      int                    `json:"sampleCount"`      // 样本数量
+	SampleDelay      time.Duration          `json:"sampleDelay"`      // 样本延迟
+	MaxDeviation     int64                  `json:"maxDeviation"`     // 最大允许偏差(纳秒)
+	SyncInterval     time.Duration          `json:"syncInterval"`     // 同步间隔
 	RecoveryTimeout  time.Duration          `json:"recoveryTimeout"`  // 恢复超时
 	NTPServers       []TimeServiceNTPServer `json:"ntpServers"`       // NTP服务器列表
 }
@@ -106,13 +108,15 @@ var config = Config{
 		ReadLimit:    512,              // 读取消息大小限制
 		ReadTimeout:  45 * time.Second, // 读取超时时间
 		PingInterval: 25 * time.Second, // 心跳间隔
+		WriteTimeout: 45 * time.Second, // 写入超时时间
 	},
 	TimeService: TimeServiceConfig{
-		SampleCount:      5,                             // 获取样本数量
-		SyncInterval:     1 * time.Hour,                 // 同步间隔
-		MaxDeviation:     2 * time.Second.Nanoseconds(), // 最大允许偏差(纳秒)
-		FailureThreshold: 5,                             // 失败阈值
-		RecoveryTimeout:  60 * time.Second,              // 恢复超时
+		FailureThreshold: 5,                              // 失败阈值，同样本数量一致
+		SampleCount:      5,                              // 样本数量
+		SampleDelay:      500 * time.Millisecond,         // 样本延迟
+		MaxDeviation:     20 * time.Second.Nanoseconds(), // 最大允许偏差(纳秒)
+		SyncInterval:     1 * time.Hour,                  // 同步间隔
+		RecoveryTimeout:  60 * time.Second,               // 恢复超时
 		NTPServers: []TimeServiceNTPServer{ // 使用默认NTP服务器列表初始化
 			{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 5.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
 			{Name: "东北大学", Address: "ntp.neu.edu.cn", Weight: 4.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
@@ -149,13 +153,23 @@ func GetConfig() *Config {
 	return globalConfig
 }
 
-// LoadConfig 从JSON文件加载配置，如果文件不存在则创建默认配置文件
+// LoadConfig 从JSON文件加载配置，如果文件不存在或为空则创建默认配置文件
 func LoadConfig() (Config, error) {
 	// 检查文件是否存在
-	if _, fileCheckErr := os.Stat(config.ConfigPath); os.IsNotExist(fileCheckErr) {
+	fileInfo, fileCheckErr := os.Stat(config.ConfigPath)
+	if os.IsNotExist(fileCheckErr) {
 		// 文件不存在，创建目录并保存默认配置
 		if err := saveConfig(config); err != nil {
 			return config, fmt.Errorf("无法创建默认配置文件: %v", err)
+		}
+		return config, nil
+	}
+
+	// 检查文件是否为空
+	if fileInfo != nil && fileInfo.Size() == 0 {
+		// 文件为空，保存默认配置
+		if err := saveConfig(config); err != nil {
+			return config, fmt.Errorf("无法保存默认配置到空文件: %v", err)
 		}
 		return config, nil
 	}
@@ -164,6 +178,15 @@ func LoadConfig() (Config, error) {
 	data, readErr := os.ReadFile(config.ConfigPath)
 	if readErr != nil {
 		return config, fmt.Errorf("无法读取配置文件: %v", readErr)
+	}
+
+	// 检查读取的内容是否为空
+	if len(data) == 0 {
+		// 文件内容为空，保存默认配置
+		if err := saveConfig(config); err != nil {
+			return config, fmt.Errorf("无法保存默认配置到空文件: %v", err)
+		}
+		return config, nil
 	}
 
 	// 解析JSON到配置结构

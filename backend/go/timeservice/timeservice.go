@@ -26,10 +26,11 @@ type TimeService struct {
 
 // TimeServiceConfig 时间服务配置
 type TimeServiceConfig struct {
-	SampleCount      int           // 获取样本数量
-	SyncInterval     time.Duration // 同步间隔
-	MaxDeviation     int64         // 最大允许偏差(纳秒)
 	FailureThreshold int64         // 失败阈值
+	SampleCount      int           // 样本数量
+	SampleDelay      time.Duration // 样本延迟
+	MaxDeviation     int64         // 最大允许偏差(纳秒)
+	SyncInterval     time.Duration // 同步间隔
 	RecoveryTimeout  time.Duration // 恢复超时
 }
 
@@ -115,10 +116,11 @@ func NewTimeService() *TimeService {
 
 	return &TimeService{
 		config: TimeServiceConfig{
+			FailureThreshold: timeService.FailureThreshold,
 			SampleCount:      timeService.SampleCount,
+			SampleDelay:      timeService.SampleDelay,
 			SyncInterval:     timeService.SyncInterval,
 			MaxDeviation:     timeService.MaxDeviation,
-			FailureThreshold: timeService.FailureThreshold,
 			RecoveryTimeout:  timeService.RecoveryTimeout,
 		},
 		ntpServers:     ntpServers,
@@ -142,7 +144,7 @@ func (ts *TimeService) Init() error {
 	ts.monotonicTimeStart = time.Now()
 
 	// 2. 同步多源NTP获取初始基准时间
-	trustedBaseTime, err := ts.syncMultiNTPTime()
+	trustedBaseTime, err := ts.queryMultiSyncTime()
 
 	// 无论成功还是失败，都要更新总同步计数
 	atomic.AddInt64(&ts.stats.TotalSyncs, 1)
@@ -268,7 +270,7 @@ func (ts *TimeService) syncWithRetry() {
 // updateOffset 更新时间偏移量
 func (ts *TimeService) updateOffset() error {
 	// 获取可信基准时间
-	trustedBaseTime, err := ts.syncMultiNTPTime()
+	trustedBaseTime, err := ts.queryMultiSyncTime()
 	if err != nil {
 		return err
 	}
@@ -291,9 +293,9 @@ func (ts *TimeService) updateOffset() error {
 	return nil
 }
 
-// syncMultiNTPTime 多源NTP同步，每个服务器获取配置中指定数量的样本，并行查询所有服务器，优先选择所有样本都成功的服务器
-func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
-	logger.Info("TimeService", fmt.Sprintf("开始多源NTP同步（并行查询所有服务器，每个服务器获取%d个样本，优先选择所有样本都成功的服务器）...\n", ts.config.SampleCount))
+// queryMultiSyncTime 多源NTP同步
+func (ts *TimeService) queryMultiSyncTime() (time.Time, error) {
+	logger.Info("TimeService", fmt.Sprintf("开始多源NTP同步（并行查询所有服务器，每个服务器获取%d个样本）...\n", ts.config.SampleCount))
 
 	var bestResult *TimeServiceNTPTimeResult
 	maxDeviation := ts.config.MaxDeviation
@@ -310,13 +312,12 @@ func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
 	// 启动goroutine并行查询每个服务器
 	for _, server := range ts.ntpServers {
 		go func(s TimeServiceNTPServer) {
-			result, err := ts.queryNTPServer(s)
+			result, err := ts.querySingleSyncTime(s)
 			resultChan <- serverResult{server: s, result: result, err: err}
 		}(server)
 	}
 
 	// 收集所有服务器的查询结果
-	// 确保每个服务器都完成指定数量的样本收集（无论成功失败）
 	results := make([]serverResult, 0, len(ts.ntpServers))
 	for i := 0; i < len(ts.ntpServers); i++ {
 		resultChans := <-resultChan
@@ -326,15 +327,19 @@ func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
 				resultChans.server.Address, resultChans.result.SampleCount, ts.config.SampleCount))
 		}
 		results = append(results, resultChans)
-		logger.Info("TimeService", fmt.Sprintf("已收集到NTP服务器 %s 的查询结果，样本数: %d\n",
-			resultChans.server.Address, resultChans.result.SampleCount))
 	}
+
+	// 按权重对所有有效服务器降序排序
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].server.Weight > results[j].server.Weight
+	})
 
 	// 分析结果，找到最佳服务器
 	var validResults []serverResult // 存储所有有效的查询结果
 
 	// 首先收集所有有效的查询结果
 	for _, resultChans := range results {
+		// 检查是否查询失败
 		if resultChans.err != nil {
 			logger.Info("TimeService", fmt.Sprintf("查询NTP服务器 %s 失败: %v\n", resultChans.server.Address, resultChans.err))
 			continue
@@ -364,55 +369,42 @@ func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
 		validResults = append(validResults, resultChans)
 	}
 
-	// 过滤出所有样本都成功的服务器
-	var fullSampleResults []serverResult
-	for _, resultChans := range validResults {
-		if resultChans.result.SuccessCount == ts.config.SampleCount {
-			fullSampleResults = append(fullSampleResults, resultChans)
-		}
-	}
-
-	// 如果存在所有样本都成功的服务器，优先选择权重最高的
-	if len(fullSampleResults) > 0 {
-		// 按权重排序，权重最高的优先
-		sort.Slice(fullSampleResults, func(i, j int) bool {
-			return fullSampleResults[i].server.Weight > fullSampleResults[j].server.Weight
-		})
-
-		bestResult = &fullSampleResults[0].result
-		logger.Info("TimeService", fmt.Sprintf("找到%d个样本都成功的NTP服务器 %s（权重: %.1f），立即使用\n",
-			ts.config.SampleCount, fullSampleResults[0].server.Address, fullSampleResults[0].server.Weight))
-	} else if len(validResults) > 0 {
-		// 没有服务器存在所有样本都成功，则按权重和成功样本数综合排序
-		sort.Slice(validResults, func(i, j int) bool {
-			// 首先按成功样本数排序
-			if validResults[i].result.SuccessCount != validResults[j].result.SuccessCount {
-				return validResults[i].result.SuccessCount > validResults[j].result.SuccessCount
-			}
-			// 成功样本数相同时，按权重排序
-			return validResults[i].server.Weight > validResults[j].server.Weight
-		})
-
+	// 选择权重最高的服务器的最后一个样本计算可信时间
+	if len(validResults) > 0 {
+		bestServer := validResults[0].server
 		bestResult = &validResults[0].result
-		logger.Info("TimeService", fmt.Sprintf("选择最佳NTP服务器 %s（权重: %.1f，成功样本数: %d）\n",
-			validResults[0].server.Address, validResults[0].server.Weight, validResults[0].result.SuccessCount))
+
+		// 获取该服务器的最后一个样本
+		if samples, exists := ts.lastNTPSamples[bestServer.Address]; exists && len(samples) > 0 {
+			lastSample := samples[len(samples)-1]
+			// 使用最后一个样本的时间戳作为可信时间
+			bestResult.Timestamp = lastSample.Timestamp
+			bestResult.Deviation = lastSample.Deviation
+			bestResult.RTT = float64(lastSample.RTT)
+
+			logger.Info("TimeService", fmt.Sprintf("选择权重最高的NTP服务器 %s（权重: %.1f），使用其最后一个样本计算可信时间\n",
+				bestServer.Address, bestServer.Weight))
+		} else {
+			logger.Info("TimeService", fmt.Sprintf("选择权重最高的NTP服务器 %s（权重: %.1f），但未找到样本数据\n",
+				bestServer.Address, bestServer.Weight))
+		}
 	}
 
 	// 检查是否找到有效的NTP服务器
 	if bestResult == nil {
 		logger.Info("TimeService", "多源NTP同步失败，没有找到有效的NTP服务器\n")
-		return time.Time{}, fmt.Errorf("没有找到有效的NTP服务器")
+		return time.Time{}, fmt.Errorf("多源NTP同步失败，没有找到有效的NTP服务器")
 	}
 
 	// 使用找到的最佳服务器结果
 	trustedTime := time.Unix(0, bestResult.Timestamp)
 
-	// 标记选中的服务器
+	// 标记选中的服务器，只对选中的服务器设置IsSelected=true，其他服务器保持不变
 	for i, server := range ts.ntpServers {
 		if server.Address == bestResult.Server {
 			ts.ntpServers[i].IsSelected = true
-		} else {
-			ts.ntpServers[i].IsSelected = false
+			logger.Info("TimeService", fmt.Sprintf("已标记NTP服务器 %s 为选中状态\n", server.Address))
+			break // 只标记选中的服务器，其他服务器保持不变
 		}
 	}
 
@@ -427,80 +419,16 @@ func (ts *TimeService) syncMultiNTPTime() (time.Time, error) {
 	return trustedTime, nil
 }
 
-// queryNTPServer 查询单个NTP服务器，获取配置中指定数量的样本
-func (ts *TimeService) queryNTPServer(server TimeServiceNTPServer) (TimeServiceNTPTimeResult, error) {
-	// 检查lastNTPSamples中是否有有效的缓存数据
-	const cacheExpiry = 30 * time.Second // 缓存30秒过期
-	if samples, exists := ts.lastNTPSamples[server.Address]; exists && len(samples) > 0 {
-		// 检查最后一个样本的时间戳是否在缓存有效期内
-		lastSampleTime := time.Unix(0, samples[len(samples)-1].Timestamp)
-		if time.Since(lastSampleTime) < cacheExpiry {
-			// 使用缓存的样本数据计算结果
-			successCount := 0
-			for _, sample := range samples {
-				if sample.Status == "Success" {
-					successCount++
-				}
-			}
-
-			// 计算中位数时间戳
-			sortedSamples := make([]TimeServiceNTPSample, len(samples))
-			copy(sortedSamples, samples)
-			sort.Slice(sortedSamples, func(i, j int) bool {
-				return sortedSamples[i].Timestamp < sortedSamples[j].Timestamp
-			})
-			medianTimestamp := sortedSamples[len(sortedSamples)/2].Timestamp
-
-			// 查找最后一个成功样本的偏差和RTT
-			var lastSuccessDeviation float64
-			var lastSuccessRTT int64
-			foundSuccessSample := false
-
-			for i := len(sortedSamples) - 1; i >= 0; i-- {
-				if sortedSamples[i].Status == "Success" {
-					lastSuccessDeviation = sortedSamples[i].Deviation
-					lastSuccessRTT = sortedSamples[i].RTT
-					foundSuccessSample = true
-					break
-				}
-			}
-
-			// 如果没有找到成功样本，使用最后一个样本的偏差和RTT
-			if !foundSuccessSample {
-				lastSuccessDeviation = sortedSamples[len(sortedSamples)-1].Deviation
-				lastSuccessRTT = sortedSamples[len(sortedSamples)-1].RTT
-			}
-
-			result := TimeServiceNTPTimeResult{
-				Timestamp:    medianTimestamp,
-				Deviation:    lastSuccessDeviation,
-				Weight:       server.Weight,
-				Server:       server.Address,
-				SampleCount:  len(samples),
-				SuccessCount: successCount,
-				RTT:          float64(lastSuccessRTT),
-			}
-
-			logger.Info("TimeService", fmt.Sprintf("使用NTP服务器 %s 的缓存样本数据，缓存时间: %.2f秒前\n",
-				server.Address, time.Since(lastSampleTime).Seconds()))
-			return result, nil
-		}
-	}
-
+// querySingleSyncTime 查询单个NTP服务器
+func (ts *TimeService) querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPTimeResult, error) {
 	var samples []TimeServiceNTPSample
 	sampleCount := ts.config.SampleCount // 使用配置中的样本数量
-	var consecutiveSuccesses = 0
-	var failedAttempts = 0
-	var invalidStratumAttempts = 0
-	const sampleDelay = 20 * time.Millisecond // 减少样本间延迟从50ms到20ms
+	sampleDelay := ts.config.SampleDelay // 使用配置中的样本延迟
 
-	// 获取配置中指定数量的样本，不管成功失败都必须获取指定数量的样本
+	// 获取配置中指定数量的样本
 	for i := 0; i < sampleCount; i++ {
 		resp, err := ntp.Query(server.Address)
 		if err != nil {
-			failedAttempts++
-			consecutiveSuccesses = 0 // 重置连续成功计数
-
 			// 添加失败样本，状态为"失败"
 			samples = append(samples, TimeServiceNTPSample{
 				Timestamp: time.Now().UnixNano(), // 使用当前时间作为时间戳
@@ -517,9 +445,6 @@ func (ts *TimeService) queryNTPServer(server TimeServiceNTPServer) (TimeServiceN
 		}
 
 		if resp.Stratum == 0 { // Stratum 0为无效源
-			invalidStratumAttempts++
-			consecutiveSuccesses = 0 // 重置连续成功计数
-
 			// 添加无效源样本，状态为"失败"
 			samples = append(samples, TimeServiceNTPSample{
 				Timestamp: time.Now().UnixNano(), // 使用当前时间作为时间戳
@@ -547,15 +472,13 @@ func (ts *TimeService) queryNTPServer(server TimeServiceNTPServer) (TimeServiceN
 			Status:    "Success", // 设置状态为成功
 		})
 
-		consecutiveSuccesses++
-
 		// 只有在不是最后一次循环时才延迟
 		if i < sampleCount-1 {
 			time.Sleep(sampleDelay)
 		}
 	}
 
-	// 保存样本数据到lastNTPSamples字段（即使样本数量不足也要保存）
+	// 保存样本数据到lastNTPSamples字段
 	ts.lastNTPSamples[server.Address] = samples
 
 	// 计算成功样本数
@@ -614,16 +537,16 @@ func (ts *TimeService) queryNTPServer(server TimeServiceNTPServer) (TimeServiceN
 		// 记录样本列表信息
 		sampleInfo := "样本列表: "
 		for i, sample := range samples {
-			sampleInfo += fmt.Sprintf("[序号%d, 偏差%.2fms, RTT%.2fms, 状态%s] ",
-				i+1, sample.Deviation/1e6, float64(sample.RTT)/1e6, sample.Status)
+			sampleInfo += fmt.Sprintf("[序号%d, 状态%s, RTT%.2fms, 偏差%.2fms] ",
+				i+1, sample.Status, float64(sample.RTT)/1e6, sample.Deviation/1e6)
 		}
 
-		logger.Info("TimeService", fmt.Sprintf("NTP服务器 %s 采样完成，有效样本数: %d, 偏差: %.2f ms, 往返时间: %.2f ms, 失败次数: %d, 无效源次数: %d\n%s\n",
-			server.Address, len(samples), lastSuccessDeviation/1e6, rtt/1e6, failedAttempts, invalidStratumAttempts, sampleInfo))
+		logger.Info("TimeService", fmt.Sprintf("NTP服务器 %s 采样完成，有效样本数: %d, 往返时间: %.2f ms, 偏差: %.2f ms\n%s\n",
+			server.Address, len(samples), rtt/1e6, lastSuccessDeviation/1e6, sampleInfo))
 	} else {
 		// 即使没有有效样本也要记录
-		logger.Info("TimeService", fmt.Sprintf("NTP服务器 %s 采样完成，有效样本数: 0, 失败次数: %d, 无效源次数: %d\n",
-			server.Address, failedAttempts, invalidStratumAttempts))
+		logger.Info("TimeService", fmt.Sprintf("NTP服务器 %s 采样完成，有效样本数: 0\n",
+			server.Address))
 	}
 
 	// 检查是否有足够的有效样本并且满足最少连续成功阈值
@@ -737,7 +660,7 @@ func (ts *TimeService) GetNTPServers() []TimeServiceNTPServer {
 var globalTimeService *TimeService
 
 // InitGlobalTimeService 初始化全局时间服务并返回实例
-func InitGlobalTimeService(_config config.Config) (*TimeService, error) {
+func InitGlobalTimeService() (*TimeService, error) {
 	// 使用获取的NTP服务器配置初始化时间服务
 	globalTimeService = NewTimeService()
 	err := globalTimeService.Init()
@@ -763,6 +686,11 @@ func GetTrustedTime() time.Time {
 		return time.Now()
 	}
 	return globalTimeService.GetTrustedTime()
+}
+
+// Now 获取全局格式化的可信时间（别名函数，方便使用）
+func Now() time.Time {
+	return GetTrustedTime()
 }
 
 // GetLastNTPSamples 获取上一次获取的NTP样本数据

@@ -282,7 +282,7 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	lastSamples := api.timeService.GetLastNTPSamples()
 
 	// 转换为响应格式
-	var ntpServerInfos []TimeServiceANTPServer
+	var ntpServerResponse []TimeServiceANTPServer
 	for _, server := range ntpServers {
 		var samples []TimeServiceANTPSample
 		if serverSamples, exists := lastSamples[server.Address]; exists {
@@ -298,7 +298,7 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 基本信息始终填充
-		serverInfo := TimeServiceANTPServer{
+		serverResponse := TimeServiceANTPServer{
 			Name:         server.Name,
 			Address:      server.Address,
 			Weight:       server.Weight,
@@ -310,12 +310,12 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 			IsSelected:   server.IsSelected, // 添加IsSelected字段
 		}
 
-		ntpServerInfos = append(ntpServerInfos, serverInfo)
+		ntpServerResponse = append(ntpServerResponse, serverResponse)
 	}
 
 	// 构建响应
 	response := TimeServiceANTPPoolResponse{
-		NTPServers: ntpServerInfos,
+		NTPServers: ntpServerResponse,
 	}
 
 	// 设置响应头
