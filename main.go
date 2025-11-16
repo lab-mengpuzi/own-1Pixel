@@ -14,6 +14,7 @@ import (
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/market"
 	"own-1Pixel/backend/go/timeservice"
+	"own-1Pixel/backend/go/timeservice/clock"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -281,6 +282,9 @@ func reactivateAuction(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	var err error
+
+	// 初始化时钟基准系统
+	clock.InitClock()
 
 	// 初始化全局配置实例
 	_config := config.InitConfig()

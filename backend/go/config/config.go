@@ -64,7 +64,6 @@ type TimeServiceConfig struct {
 	FailureThreshold int64                  `json:"failureThreshold"` // 失败阈值
 	SampleCount      int                    `json:"sampleCount"`      // 样本数量
 	SampleDelay      time.Duration          `json:"sampleDelay"`      // 样本延迟
-	MaxDeviation     int64                  `json:"maxDeviation"`     // 最大允许偏差(纳秒)
 	SyncInterval     time.Duration          `json:"syncInterval"`     // 同步间隔
 	RecoveryTimeout  time.Duration          `json:"recoveryTimeout"`  // 恢复超时
 	NTPServers       []TimeServiceNTPServer `json:"ntpServers"`       // NTP服务器列表
@@ -111,18 +110,17 @@ var config = Config{
 		WriteTimeout: 45 * time.Second, // 写入超时时间
 	},
 	TimeService: TimeServiceConfig{
-		FailureThreshold: 5,                              // 失败阈值，同样本数量一致
-		SampleCount:      5,                              // 样本数量
-		SampleDelay:      500 * time.Millisecond,         // 样本延迟
-		MaxDeviation:     20 * time.Second.Nanoseconds(), // 最大允许偏差(纳秒)
-		SyncInterval:     1 * time.Hour,                  // 同步间隔
-		RecoveryTimeout:  60 * time.Second,               // 恢复超时
+		FailureThreshold: 5,                      // 失败阈值，同样本数量一致
+		SampleCount:      5,                      // 样本数量
+		SampleDelay:      500 * time.Millisecond, // 样本延迟
+		SyncInterval:     1 * time.Hour,          // 同步间隔
+		RecoveryTimeout:  60 * time.Second,       // 恢复超时
 		NTPServers: []TimeServiceNTPServer{ // 使用默认NTP服务器列表初始化
-			{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 5.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "东北大学", Address: "ntp.neu.edu.cn", Weight: 4.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "大连东软信息学院", Address: "ntp.neusoft.edu.cn", Weight: 3.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 2.0, IsDomestic: true, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 1.0, IsDomestic: false, MaxDeviation: 2 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 5.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "东北大学", Address: "ntp.neu.edu.cn", Weight: 4.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "大连东软信息学院", Address: "ntp.neusoft.edu.cn", Weight: 3.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 2.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 1.0, IsDomestic: false, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
 		},
 	},
 }
