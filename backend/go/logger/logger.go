@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"own-1Pixel/backend/go/config"
+	"own-1Pixel/backend/go/timeservice/clock"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 var (
@@ -52,8 +52,7 @@ func Info(packageName, message string) {
 	}
 
 	// 获取当前时间，格式化为 年-月-日 时:分:秒.毫秒(保留3位)
-	now := time.Now()
-	dateFormat := now.Format("2006-01-02 15:04:05.000")
+	dateFormat := clock.TimeFormat(clock.GetSystemTimestamp())
 
 	// 构建日志消息
 	logMessage := fmt.Sprintf("%s [%s] %s", dateFormat, packageName, message)
