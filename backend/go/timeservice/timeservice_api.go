@@ -8,13 +8,13 @@ import (
 	"own-1Pixel/backend/go/timeservice/clock"
 )
 
-// TimeServiceATimeInfoResponse 时间信息响应
-type TimeServiceATimeInfoResponse struct {
-	TrustedTimestamp int64  `json:"trusted_timestamp"` // 可信时间戳（纳秒）
-	TrustedTime      string `json:"trusted_time"`      // 格式化的可信时间
-	SystemTime       string `json:"system_time"`       // 系统时间
-	SyncTimeOffset   int64  `json:"sync_time_offset"`  // 同步时间偏移量（纳秒）
-	IsDegraded       bool   `json:"is_degraded"`       // 是否处于降级模式
+// TimeServiceASyncTimeResponse 时间信息响应
+type TimeServiceASyncTimeResponse struct {
+	SystemTime     string `json:"system_time"`      // 系统时间
+	SyncTimestamp  int64  `json:"sync_timestamp"`   // 同步时间戳（纳秒）
+	SyncTime       string `json:"sync_time"`        // 格式化的同步时间
+	SyncTimeOffset int64  `json:"sync_time_offset"` // 同步时间偏移量（纳秒）
+	IsDegraded     bool   `json:"is_degraded"`      // 是否处于降级模式
 }
 
 // TimeServiceAStatusResponse 状态响应
@@ -67,8 +67,8 @@ type TimeServiceACircuitBreakerResponse struct {
 	SuccessCount    int64  `json:"success_count"`     // 成功计数
 }
 
-// GetTimeInfo 获取时间信息
-func GetTimeInfo(w http.ResponseWriter, r *http.Request) {
+// GetSyncTime 获取同步时间
+func GetSyncTime(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
@@ -79,12 +79,12 @@ func GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 	if !status.IsInitialized {
 		// 时间服务未初始化，返回系统时间（降级模式）
 		systemTime := SyncNow()
-		response := TimeServiceATimeInfoResponse{
-			TrustedTimestamp: systemTime.UnixNano(),
-			TrustedTime:      clock.Format(systemTime),
-			SystemTime:       clock.Format(systemTime),
-			SyncTimeOffset:   0,
-			IsDegraded:       true,
+		response := TimeServiceASyncTimeResponse{
+			SystemTime:     clock.Format(systemTime),
+			SyncTimestamp:  systemTime.UnixNano(),
+			SyncTime:       clock.Format(systemTime),
+			SyncTimeOffset: 0,
+			IsDegraded:     true,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -92,21 +92,21 @@ func GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取可信时间
-	syncTime := GetSyncTimestamp()
-	syncTimestamp := syncTime.UnixNano()
-	syncTimeFormatted := clock.Format(syncTime)
+	// 获取同步时间
 	systemTime := clock.Format(clock.Now())
+	syncTimestamp := GetSyncTimestamp()
+	syncTime := syncTimestamp.UnixNano()
 	syncTimeOffset := GetSyncTimestampOffset()
 	isDegraded := IsInDegradedMode()
+	syncTimeFormatted := clock.Format(syncTimestamp)
 
 	// 构建响应
-	response := TimeServiceATimeInfoResponse{
-		TrustedTimestamp: syncTimestamp,
-		TrustedTime:      syncTimeFormatted,
-		SystemTime:       systemTime,
-		SyncTimeOffset:   syncTimeOffset,
-		IsDegraded:       isDegraded,
+	response := TimeServiceASyncTimeResponse{
+		SystemTime:     systemTime,
+		SyncTimestamp:  syncTime,
+		SyncTime:       syncTimeFormatted,
+		SyncTimeOffset: syncTimeOffset,
+		IsDegraded:     isDegraded,
 	}
 
 	// 设置响应头

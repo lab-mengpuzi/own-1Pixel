@@ -391,7 +391,7 @@ func main() {
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
 
 	// 时间服务系统API端点
-	http.HandleFunc("/api/timeservice/time-info", timeservice.GetTimeInfo)
+	http.HandleFunc("/api/timeservice/sync-time", timeservice.GetSyncTime)
 	http.HandleFunc("/api/timeservice/status", timeservice.GetStatus)
 	http.HandleFunc("/api/timeservice/stats", timeservice.GetStats)
 	http.HandleFunc("/api/timeservice/circuit-breaker", timeservice.GetCircuitBreakerState)
