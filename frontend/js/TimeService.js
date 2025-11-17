@@ -37,7 +37,7 @@ class TimeService {
         tabContentsContainer.innerHTML = timeInfoTab + statusTab + statsTab + circuitBreakerTab;
         
         // 将容器插入到导航标签后面
-        const navElement = document.querySelector('.border-b.border-gray-200');
+        const navElement = document.querySelector('.border-b.border-gray-200').parentElement;
         navElement.insertAdjacentElement('afterend', tabContentsContainer);
     }
 
@@ -45,14 +45,14 @@ class TimeService {
     createTimeInfoTab() {
         return `
         <!-- 时间信息标签页 -->
-        <div id="time-info" class="tab-content">
+        <div id="sync-time-tab" class="tab-content">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold text-gray-800 mb-4">当前时间信息</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <h3 class="text-lg font-medium text-gray-700 mb-2">可信时间</h3>
-                        <p id="trusted-time" class="text-gray-600 mb-1">加载中...</p>
-                        <p id="trusted-timestamp" class="text-sm text-gray-500">时间戳: 加载中...</p>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">同步时间</h3>
+                        <p id="sync-time" class="text-gray-600 mb-1">加载中...</p>
+                        <p id="sync-timestamp" class="text-sm text-gray-500">时间戳: 加载中...</p>
                     </div>
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">系统时间</h3>
@@ -63,8 +63,8 @@ class TimeService {
                 <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">时间偏移量</h3>
-                        <p id="time-offset" class="text-gray-600">加载中...</p>
-                        <p class="text-sm text-gray-500">可信基准时间与单调时钟的偏移</p>
+                        <p id="sync-time-offset" class="text-gray-600">加载中...</p>
+                        <p class="text-sm text-gray-500">同步时间戳与程序启动时间戳的偏移</p>
                     </div>
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">服务模式</h3>
@@ -85,7 +85,7 @@ class TimeService {
     createStatusTab() {
         return `
         <!-- 服务状态标签页 -->
-        <div id="status" class="tab-content hidden">
+        <div id="status-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold text-gray-800 mb-4">时间服务状态</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -125,7 +125,7 @@ class TimeService {
     createStatsTab() {
         return `
         <!-- 统计信息标签页 -->
-        <div id="stats" class="tab-content hidden">
+        <div id="stats-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold text-gray-800 mb-4">时间服务统计</h2>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -161,7 +161,7 @@ class TimeService {
     createCircuitBreakerTab() {
         return `
         <!-- 熔断器标签页 -->
-        <div id="circuit-breaker" class="tab-content hidden">
+        <div id="circuit-breaker-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold text-gray-800 mb-4">熔断器状态</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -235,7 +235,7 @@ class TimeService {
         const refreshTimeBtn = document.getElementById('refresh-time');
         if (refreshTimeBtn) {
             refreshTimeBtn.addEventListener('click', () => {
-                this.loadTimeInfo();
+                this.loadSyncTime();
             });
         }
 
@@ -266,41 +266,48 @@ class TimeService {
 
     // 加载初始数据
     loadInitialData() {
-        this.loadTimeInfo();
+        // 确保第一个标签页（时间信息标签页）是可见的
+        const firstTab = document.getElementById('sync-time-tab');
+        if (firstTab) {
+            firstTab.classList.remove('hidden');
+        }
+        
+        // 加载第一个标签页的数据
+        this.loadSyncTime();
     }
 
     // 根据当前标签加载对应数据
     loadTabData(tabId) {
         switch(tabId) {
-            case 'time-info':
-                this.loadTimeInfo();
+            case 'sync-time-tab':
+                this.loadSyncTime();
                 break;
-            case 'status':
+            case 'status-tab':
                 this.loadStatus();
                 break;
-            case 'stats':
+            case 'stats-tab':
                 this.loadStats();
                 break;
-            case 'circuit-breaker':
+            case 'circuit-breaker-tab':
                 this.loadCircuitBreakerState();
                 break;
         }
     }
 
-    // 加载时间信息
-    async loadTimeInfo() {
+    // 加载同步时间
+    async loadSyncTime() {
         try {
-            const response = await fetch('/api/timeservice/time-info');
+            const response = await fetch('/api/timeservice/sync-time');
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
             
             // 更新时间信息
-            document.getElementById('trusted-time').textContent = data.trusted_time;
-            document.getElementById('trusted-timestamp').textContent = `时间戳: ${data.trusted_timestamp}`;
+            document.getElementById('sync-time').textContent = data.sync_time;
+            document.getElementById('sync-timestamp').textContent = `时间戳: ${data.sync_timestamp}`;
             document.getElementById('system-time').textContent = data.system_time;
-            document.getElementById('time-offset').textContent = this.formatNanoseconds(data.sync_time_offset);
+            document.getElementById('sync-time-offset').textContent = this.formatNanoseconds(data.sync_time_offset);
             
             // 更新服务模式
             const modeElement = document.getElementById('service-mode');
@@ -543,32 +550,22 @@ class TimeService {
         
         if (nanoseconds === 0) return '0';
         
-        const absNs = Math.abs(nanoseconds);
+        const absNanoseconds = Math.abs(nanoseconds);
+        const precision = 7;
         let value, unit;
         
-        if (absNs < 1000) {
+        if (absNanoseconds < 1000) {
             value = nanoseconds;
             unit = 'ns';
-        } else if (absNs < 1000000) {
+        } else if (absNanoseconds < 1000000) {
             value = nanoseconds / 1000;
             unit = 'μs';
-        } else if (absNs < 1000000000) {
+        } else if (absNanoseconds < 1000000000) {
             value = nanoseconds / 1000000;
             unit = 'ms';
         } else {
             value = nanoseconds / 1000000000;
             unit = 's';
-        }
-        
-        // 对于秒单位，使用7位小数精度，格式为2.0000000
-        if (unit === 's') {
-            return `${value.toFixed(7)} ${unit}`;
-        }
-        
-        // 对于较大的值，使用更合适的精度
-        let precision = 2;
-        if (unit === 's' && absNs >= 10000000000) { // 10秒以上
-            precision = 1;
         }
         
         return `${value.toFixed(precision)} ${unit}`;
