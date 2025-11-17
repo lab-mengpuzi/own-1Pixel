@@ -494,7 +494,7 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	// 隐私数据
 	_, err = tx.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.Now(), "玩家", "系统", "玩家银行", "系统银行", 0, 0, note)
+		timeservice.SyncNow(), "玩家", "系统", "玩家银行", "系统银行", 0, 0, note)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -729,7 +729,7 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	// 隐私数据
 	_, err = tx.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.Now(), "萌铺子市场", "玩家", "萌铺子市场银行", "玩家银行", 0, item.Price, fmt.Sprintf("卖出%s", itemType))
+		timeservice.SyncNow(), "萌铺子市场", "玩家", "萌铺子市场银行", "玩家银行", 0, item.Price, fmt.Sprintf("卖出%s", itemType))
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -1011,7 +1011,7 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	// 隐私数据
 	_, err = tx.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.Now(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", item.Price, 0, fmt.Sprintf("买入%s", itemType))
+		timeservice.SyncNow(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", item.Price, 0, fmt.Sprintf("买入%s", itemType))
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
