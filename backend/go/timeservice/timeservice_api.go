@@ -5,20 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"own-1Pixel/backend/go/logger"
-	"time"
+	"own-1Pixel/backend/go/timeservice/clock"
 )
-
-// TimeServiceAPI 时间服务API处理器
-type TimeServiceAPI struct {
-	timeService *TimeService
-}
-
-// NewTimeServiceAPI 创建时间服务API处理器
-func NewTimeServiceAPI(ts *TimeService) *TimeServiceAPI {
-	return &TimeServiceAPI{
-		timeService: ts,
-	}
-}
 
 // TimeServiceATimeInfoResponse 时间信息响应
 type TimeServiceATimeInfoResponse struct {
@@ -65,10 +53,10 @@ type TimeServiceANTPServer struct {
 
 // TimeServiceANTPSample NTP样本数据
 type TimeServiceANTPSample struct {
-	Offset    int64  `json:"offset"`    // 时间偏移量（纳秒）
-	Delay     int64  `json:"delay"`     // 往返延迟（纳秒）
 	Timestamp int64  `json:"timestamp"` // 时间戳（纳秒）
 	Status    string `json:"status"`    // 样本状态：成功、失败
+	Delay     int64  `json:"delay"`     // 往返延迟（纳秒）
+	Offset    int64  `json:"offset"`    // 时间偏移量（纳秒）
 }
 
 // TimeServiceACircuitBreakerResponse 熔断器状态响应
@@ -80,20 +68,21 @@ type TimeServiceACircuitBreakerResponse struct {
 }
 
 // GetTimeInfo 获取时间信息
-func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
+func GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 检查时间服务是否可用
-	if api.timeService == nil {
+	// 检查时间服务是否已初始化
+	status := GetTimeServiceStatus()
+	if !status.IsInitialized {
 		// 时间服务未初始化，返回系统时间（降级模式）
-		systemTime := time.Now()
+		systemTime := SyncNow()
 		response := TimeServiceATimeInfoResponse{
 			TrustedTimestamp: systemTime.UnixNano(),
-			TrustedTime:      systemTime.Format("2006-01-02 15:04:05.000000000"),
-			SystemTime:       systemTime.Format("2006-01-02 15:04:05.000000000"),
+			TrustedTime:      clock.Format(systemTime),
+			SystemTime:       clock.Format(systemTime),
 			SyncTimeOffset:   0,
 			IsDegraded:       true,
 		}
@@ -104,17 +93,18 @@ func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取可信时间
-	trustedTimestamp := api.timeService.GetTrustedTimestamp()
-	trustedTime := api.timeService.GetTrustedTime()
-	systemTime := time.Now()
-	syncTimeOffset := api.timeService.GetSyncTimeOffset()
-	isDegraded := api.timeService.IsInDegradedMode()
+	syncTime := GetSyncTimestamp()
+	syncTimestamp := syncTime.UnixNano()
+	syncTimeFormatted := clock.Format(syncTime)
+	systemTime := clock.Format(clock.Now())
+	syncTimeOffset := GetSyncTimestampOffset()
+	isDegraded := IsInDegradedMode()
 
 	// 构建响应
 	response := TimeServiceATimeInfoResponse{
-		TrustedTimestamp: trustedTimestamp,
-		TrustedTime:      trustedTime.Format("2006-01-02 15:04:05.000000000"),
-		SystemTime:       systemTime.Format("2006-01-02 15:04:05.000000000"),
+		TrustedTimestamp: syncTimestamp,
+		TrustedTime:      syncTimeFormatted,
+		SystemTime:       systemTime,
 		SyncTimeOffset:   syncTimeOffset,
 		IsDegraded:       isDegraded,
 	}
@@ -131,34 +121,20 @@ func (api *TimeServiceAPI) GetTimeInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetStatus 获取时间服务状态
-func (api *TimeServiceAPI) GetStatus(w http.ResponseWriter, r *http.Request) {
+func GetStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 检查时间服务是否可用
-	if api.timeService == nil {
-		// 时间服务未初始化，返回未初始化状态
-		response := TimeServiceAStatusResponse{
-			IsInitialized: false,
-			IsDegraded:    true,
-			LastSyncTime:  time.Time{}.Format("2006-01-02 15:04:05.000000000"),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
 	// 获取状态
-	status := api.timeService.GetStatus()
+	status := GetTimeServiceStatus()
 
 	// 构建响应
 	response := TimeServiceAStatusResponse{
 		IsInitialized: status.IsInitialized,
 		IsDegraded:    status.IsDegraded,
-		LastSyncTime:  status.LastSyncTime.Format("2006-01-02 15:04:05.000000000"),
+		LastSyncTime:  clock.Format(status.LastSyncTime),
 	}
 
 	// 设置响应头
@@ -173,30 +149,14 @@ func (api *TimeServiceAPI) GetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetStats 获取时间服务统计信息
-func (api *TimeServiceAPI) GetStats(w http.ResponseWriter, r *http.Request) {
+func GetStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 检查时间服务是否可用
-	if api.timeService == nil {
-		// 时间服务未初始化，返回空统计信息
-		response := TimeServiceAStatsResponse{
-			TotalSyncs:      0,
-			SuccessfulSyncs: 0,
-			FailedSyncs:     0,
-			LastDeviation:   0,
-			MaxDeviation:    0,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
 	// 获取统计信息
-	stats := api.timeService.GetStats()
+	stats := GetTimeServiceStats()
 
 	// 构建响应
 	response := TimeServiceAStatsResponse(stats)
@@ -213,35 +173,20 @@ func (api *TimeServiceAPI) GetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetCircuitBreakerState 获取熔断器状态
-func (api *TimeServiceAPI) GetCircuitBreakerState(w http.ResponseWriter, r *http.Request) {
+func GetCircuitBreakerState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 检查时间服务是否可用
-	if api.timeService == nil {
-		// 时间服务未初始化，返回关闭状态的熔断器
-		response := TimeServiceACircuitBreakerResponse{
-			IsOpen:          false,
-			FailureCount:    0,
-			LastFailureTime: time.Time{}.Format("2006-01-02 15:04:05.000000000"),
-			SuccessCount:    0,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
 	// 获取熔断器状态
-	cbState := api.timeService.GetCircuitBreakerState()
+	cbState := GetTimeServiceCircuitBreakerState()
 
 	// 构建响应
 	response := TimeServiceACircuitBreakerResponse{
 		IsOpen:          cbState.IsOpen,
 		FailureCount:    cbState.FailureCount,
-		LastFailureTime: cbState.LastFailureTime.Format("2006-01-02 15:04:05.000000000"),
+		LastFailureTime: clock.Format(cbState.LastFailureTime),
 		SuccessCount:    cbState.SuccessCount,
 	}
 
@@ -257,29 +202,17 @@ func (api *TimeServiceAPI) GetCircuitBreakerState(w http.ResponseWriter, r *http
 }
 
 // GetNTPPool 获取NTP池信息
-func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
+func GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "不允许的请求方法", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 检查时间服务是否可用
-	if api.timeService == nil {
-		// 时间服务未初始化，返回空NTP池
-		response := TimeServiceANTPPoolResponse{
-			NTPServers: []TimeServiceANTPServer{},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
 	// 获取NTP服务器列表
-	ntpServers := api.timeService.GetNTPServers()
+	ntpServers := GetNTPServers()
 
 	// 获取lastNTPSamples数据
-	lastSamples := api.timeService.GetLastNTPSamples()
+	lastSamples := GetLastNTPSamples()
 
 	// 转换为响应格式
 	var ntpServerResponse []TimeServiceANTPServer
@@ -289,10 +222,10 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 			// 转换为API响应格式
 			for _, sample := range serverSamples {
 				samples = append(samples, TimeServiceANTPSample{
-					Offset:    int64(sample.Deviation), // 使用Deviation作为Offset
+					Timestamp: sample.Timestamp,        // 使用实际的时间戳
+					Status:    sample.Status,           // 使用实际的Status值
 					Delay:     sample.RTT,              // 使用RTT作为Delay
-					Timestamp: sample.Timestamp,
-					Status:    sample.Status, // 使用实际的Status值
+					Offset:    int64(sample.Deviation), // 使用Deviation作为Offset
 				})
 			}
 		}
@@ -304,10 +237,10 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 			Weight:       server.Weight,
 			IsDomestic:   server.IsDomestic,
 			MaxDeviation: server.MaxDeviation,
-			IsActive:     len(samples) > 0, // 如果有样本数据，则认为服务器是活跃的
-			LastSyncTime: time.Now().Format("2006-01-02 15:04:05.000000000"),
-			Samples:      samples,           // 添加样本数据
-			IsSelected:   server.IsSelected, // 添加IsSelected字段
+			IsActive:     len(samples) > 0,          // 如果有样本数据，则认为服务器是活跃的
+			LastSyncTime: clock.Format(clock.Now()), // 使用系统时间
+			Samples:      samples,
+			IsSelected:   server.IsSelected,
 		}
 
 		ntpServerResponse = append(ntpServerResponse, serverResponse)
@@ -327,4 +260,9 @@ func (api *TimeServiceAPI) GetNTPPool(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
 		return
 	}
+}
+
+// InitTimeServiceAPI 初始化时间服务API处理器
+func InitTimeServiceAPI() error {
+	return nil
 }

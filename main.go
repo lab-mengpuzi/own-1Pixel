@@ -25,7 +25,6 @@ var frontendFS embed.FS                                         // 静态资源�
 var db *sql.DB                                                  // 数据库对象
 var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
 var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
-var timeServiceAPI *timeservice.TimeServiceAPI                  // 时间服务系统API
 
 // 初始化数据库
 func initDatabase() error {
@@ -288,26 +287,19 @@ func main() {
 
 	// 初始化全局配置实例
 	_config := config.InitConfig()
+	mainConfig := _config.Main // 获取全局配置实例
 	fmt.Printf("初始化配置文件...[%s]\n", _config.ConfigPath)
-
-	// 获取全局配置实例
-	mainConfig := _config.Main
 
 	// 初始化日志记录器
 	logger.Init()
 	fmt.Printf("初始化日志配置文件...[%s]\n", _config.Logger.Path)
 
 	// 初始化时间服务系统
-	timeService, err := timeservice.InitGlobalTimeService()
+	err = timeservice.InitTimeServiceSystem()
 	if err != nil {
 		logger.Info("main", fmt.Sprintf("初始化时间服务系统失败 -> %v\n", err))
 		fmt.Printf("初始化时间服务系统失败 -> %v\n", err)
 	}
-
-	// 无论时间服务系统是否初始化成功，都创建API实例
-	// 如果时间服务系统未初始化，API将返回降级模式响应
-	timeServiceAPI = timeservice.NewTimeServiceAPI(timeService)
-	logger.Info("main", "时间服务系统API已创建\n")
 
 	// 打开数据库连接
 	// 添加SQLite特定参数以提高并发性能
@@ -399,11 +391,11 @@ func main() {
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
 
 	// 时间服务系统API端点
-	http.HandleFunc("/api/timeservice/time-info", timeServiceAPI.GetTimeInfo)
-	http.HandleFunc("/api/timeservice/status", timeServiceAPI.GetStatus)
-	http.HandleFunc("/api/timeservice/stats", timeServiceAPI.GetStats)
-	http.HandleFunc("/api/timeservice/circuit-breaker", timeServiceAPI.GetCircuitBreakerState)
-	http.HandleFunc("/api/timeservice/ntp-pool", timeServiceAPI.GetNTPPool)
+	http.HandleFunc("/api/timeservice/time-info", timeservice.GetTimeInfo)
+	http.HandleFunc("/api/timeservice/status", timeservice.GetStatus)
+	http.HandleFunc("/api/timeservice/stats", timeservice.GetStats)
+	http.HandleFunc("/api/timeservice/circuit-breaker", timeservice.GetCircuitBreakerState)
+	http.HandleFunc("/api/timeservice/ntp-pool", timeservice.GetNTPPool)
 
 	// 记录服务器启动日志
 	logger.Info("main", fmt.Sprintf("own-1Pixel 启动服务器 %d\n", mainConfig.Port))

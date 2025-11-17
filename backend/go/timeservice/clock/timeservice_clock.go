@@ -10,7 +10,7 @@ var (
 	monotonicTimestampBase int64 // 单调时间基准
 )
 
-func GetSystemTimestamp() int64 {
+func getSystemTimestamp() int64 {
 	return systemTimestampBase
 }
 
@@ -18,8 +18,12 @@ func GetMonotonicTimestamp() int64 {
 	return monotonicTimestampBase
 }
 
-func TimeFormat(timestamp int64) string {
-	return time.Unix(0, timestamp).Format("2006-01-02 15:04:05.0000000")
+func Now() time.Time {
+	return time.Unix(0, getSystemTimestamp())
+}
+
+func Format(now time.Time) string {
+	return now.Format("2006-01-02 15:04:05.0000000")
 }
 
 func InitClock() {

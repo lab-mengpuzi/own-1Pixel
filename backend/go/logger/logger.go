@@ -52,7 +52,7 @@ func Info(packageName, message string) {
 	}
 
 	// 获取当前时间，格式化为 年-月-日 时:分:秒.毫秒(保留3位)
-	dateFormat := clock.TimeFormat(clock.GetSystemTimestamp())
+	dateFormat := clock.Format(clock.Now())
 
 	// 构建日志消息
 	logMessage := fmt.Sprintf("%s [%s] %s", dateFormat, packageName, message)
