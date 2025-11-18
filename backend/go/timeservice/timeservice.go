@@ -15,15 +15,16 @@ import (
 )
 
 var (
-	processStartTimestamp int64                             // 单调时钟起点时间
-	timeServiceConfig     config.TimeServiceConfig          // 配置参数
-	ntpServers            []TimeServiceNTPServer            // NTP服务器配置
-	status                TimeServiceStatus                 // 时间服务状态
-	circuitBreaker        TimeServiceCircuitBreakerState    // 熔断器状态
-	lastNTPSamples        map[string][]TimeServiceNTPSample // 上一次获取的NTP样本数据，按服务器地址存储
-	lastNTPSamplesMutex   sync.RWMutex                      // 保护lastNTPSamples的读写锁
-	syncTimestampOffset   int64                             // 同步时间偏移量（syncTimestamp - processStartTimestamp）
-	stats                 TimeServiceStats                  // 统计信息
+	processStartTimestampBase   int64                             // 程序开始时间基准（单调时间）
+	processStartSystemTimestamp int64                             // 程序开始时的系统时间（用于审计和降级模式转换）
+	timeServiceConfig           config.TimeServiceConfig          // 配置参数
+	ntpServers                  []TimeServiceNTPServer            // NTP服务器配置
+	status                      TimeServiceStatus                 // 时间服务状态
+	circuitBreaker              TimeServiceCircuitBreakerState    // 熔断器状态
+	lastNTPSamples              map[string][]TimeServiceNTPSample // 上一次获取的NTP样本数据，按服务器地址存储
+	lastNTPSamplesMutex         sync.RWMutex                      // 保护lastNTPSamples的读写锁
+	syncTimestampOffset         int64                             // 同步时间偏移量（syncTimestamp - systemTimestampBase）
+	stats                       TimeServiceStats                  // 统计信息
 )
 
 // TimeServiceNTPServer NTP服务器配置
@@ -86,31 +87,28 @@ func FormatNanoseconds(nanoseconds int64) string {
 		return "0"
 	}
 
-	absNanoseconds := nanoseconds
-	if nanoseconds < 0 {
-		absNanoseconds = -nanoseconds
-	}
+	absNanoseconds := math.Abs(float64(nanoseconds))
 
 	var value float64
 	var unit string
 
 	if absNanoseconds < 1000 {
-		value = float64(nanoseconds)
+		value = float64(nanoseconds) / 1.0
 		unit = "ns"
 	} else if absNanoseconds < 1000000 {
-		value = float64(nanoseconds) / 1000
+		value = float64(nanoseconds) / 1000.0
 		unit = "μs"
 	} else if absNanoseconds < 1000000000 {
-		value = float64(nanoseconds) / 1000000
+		value = float64(nanoseconds) / 1000000.0
 		unit = "ms"
 	} else {
-		value = float64(nanoseconds) / 1000000000
+		value = float64(nanoseconds) / 1000000000.0
 		unit = "s"
 	}
 
 	precision := 7
 
-	return fmt.Sprintf(fmt.Sprintf("%%.%df %%s", precision), value, unit)
+	return fmt.Sprintf(fmt.Sprintf("%%+.%df%%s", precision), value, unit)
 }
 
 // GetStatus 获取时间服务状态
@@ -171,8 +169,8 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPTimeResult,
 			continue
 		}
 
-		// 计算偏差
-		deviation := math.Abs(float64(resp.Time.UnixNano() - systemTimestampBase))
+		// 计算偏差（系统时间快于NTP时间为正偏差，系统时间慢于NTP时间为负偏差）
+		deviation := float64(resp.Time.UnixNano() - systemTimestampBase)
 
 		// 添加成功样本，状态为"成功"
 		samples = append(samples, TimeServiceNTPSample{
@@ -237,12 +235,18 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPTimeResult,
 		// 记录样本列表信息
 		sampleList := "样本列表: "
 		for i, sample := range samples {
-			sampleList += fmt.Sprintf("[序号%d，时间戳%d，状态%s，RTT%s，偏差%s] ",
-				i+1, sample.Timestamp, sample.Status, FormatNanoseconds(sample.RTT), FormatNanoseconds(int64(sample.Deviation)))
+			// 直接使用FormatNanoseconds函数，它会处理正负号
+			deviationDesc := FormatNanoseconds(int64(sample.Deviation))
+
+			sampleList += fmt.Sprintf("[序号：%d，时间戳：%d，状态：%s，RTT：%s，偏差：%s] ",
+				i+1, sample.Timestamp, sample.Status, FormatNanoseconds(sample.RTT), deviationDesc)
 		}
 
-		logger.Info("TimeService", fmt.Sprintf("第一个成功NTP服务器 %s，权重: %.1f，往返时间: %s，偏差: %s\n%s\n",
-			firstAddress, firstWeight, FormatNanoseconds(int64(firstRTT)), FormatNanoseconds(int64(firstDeviation)), sampleList))
+		// 直接使用FormatNanoseconds函数，它会处理正负号
+		firstDeviationDesc := FormatNanoseconds(int64(firstDeviation))
+
+		logger.Info("TimeService", fmt.Sprintf("第一个成功NTP服务器：%s，权重：%.1f，往返时间：%s，偏差：%s\n%s\n",
+			firstAddress, firstWeight, FormatNanoseconds(int64(firstRTT)), firstDeviationDesc, sampleList))
 	}
 
 	// 没有获取到任何样本
@@ -310,7 +314,7 @@ func queryMultiSyncTimestamp() (int64, error) {
 			_timeServiceNTPTimeResult, err := querySingleSyncTime(_timeServiceNTPServer)
 			if err != nil {
 				// 记录查询结果
-				logger.Info("TimeService", fmt.Sprintf("查询NTP服务器 %s 结果: %v, 错误: %v\n", _timeServiceNTPServer.Address, _timeServiceNTPTimeResult, err))
+				logger.Info("TimeService", fmt.Sprintf("查询NTP服务器：%s，结果：%v，错误：%v\n", _timeServiceNTPServer.Address, _timeServiceNTPTimeResult, err))
 			}
 
 			// 获取第一个成功样本，避免后续重复查找
@@ -344,7 +348,7 @@ func queryMultiSyncTimestamp() (int64, error) {
 		resultChans := <-resultChan
 		// 检查结果是否包含指定数量的样本
 		if resultChans.err == nil && resultChans.timeServiceNTPTimeResult.SampleCount != timeServiceConfig.SampleCount {
-			logger.Info("TimeService", fmt.Sprintf("警告: NTP服务器 %s 返回的样本数(%d)与配置的样本数(%d)不匹配\n",
+			logger.Info("TimeService", fmt.Sprintf("警告: NTP服务器：%s，返回的样本数(%d)与配置的样本数(%d)不匹配\n",
 				resultChans.timeServiceNTPServer.Address, resultChans.timeServiceNTPTimeResult.SampleCount, timeServiceConfig.SampleCount))
 		}
 		results = append(results, resultChans)
@@ -362,20 +366,25 @@ func queryMultiSyncTimestamp() (int64, error) {
 	for _, resultChans := range results {
 		// 检查是否查询失败
 		if resultChans.err != nil {
-			logger.Info("TimeService", fmt.Sprintf("查询NTP服务器 %s 失败: %v\n", resultChans.timeServiceNTPServer.Address, resultChans.err))
+			logger.Info("TimeService", fmt.Sprintf("查询NTP服务器：%s，失败：%v\n", resultChans.timeServiceNTPServer.Address, resultChans.err))
 			continue
 		}
 
-		// 检查偏差是否在允许范围内
+		// 检查偏差是否在允许范围内（使用绝对值进行比较，但保留原始偏差值用于日志）
 		if math.Abs(resultChans.timeServiceNTPTimeResult.Deviation) > float64(resultChans.timeServiceNTPServer.MaxDeviation) {
-			logger.Info("TimeService", fmt.Sprintf("NTP时间异常跳变（偏差过大）：%s，跳过服务器 %s，可能存在入侵风险\n",
-				FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.Deviation)), resultChans.timeServiceNTPServer.Address))
+			// 直接使用FormatNanoseconds函数，它会处理正负号
+			deviationDesc := FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.Deviation))
+
+			logger.Info("TimeService", fmt.Sprintf("NTP时间偏差过大：%s，跳过服务器：%s，可能存在时间同步问题\n",
+				deviationDesc, resultChans.timeServiceNTPServer.Address))
 			continue
 		}
 
-		// 记录采样结果
-		logger.Info("TimeService", fmt.Sprintf("NTP服务器 %s 采样成功，权重: %.1f，样本数: %d，成功样本数: %d，往返时间: %s，偏差: %s\n",
-			resultChans.timeServiceNTPServer.Address, resultChans.timeServiceNTPServer.Weight, resultChans.timeServiceNTPTimeResult.SampleCount, resultChans.timeServiceNTPTimeResult.SuccessCount, FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.RTT)), FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.Deviation))))
+		// 直接使用FormatNanoseconds函数，它会处理正负号
+		deviationDesc := FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.Deviation))
+
+		logger.Info("TimeService", fmt.Sprintf("NTP服务器：%s，采样成功，权重：%.1f，样本数：%d，成功样本数：%d，往返时间：%s，偏差：%s\n",
+			resultChans.timeServiceNTPServer.Address, resultChans.timeServiceNTPServer.Weight, resultChans.timeServiceNTPTimeResult.SampleCount, resultChans.timeServiceNTPTimeResult.SuccessCount, FormatNanoseconds(int64(resultChans.timeServiceNTPTimeResult.RTT)), deviationDesc))
 
 		// 添加到有效结果列表
 		validResults = append(validResults, resultChans)
@@ -421,7 +430,7 @@ func queryMultiSyncTimestamp() (int64, error) {
 	for i, server := range ntpServers {
 		if server.Address == lastResult.Address {
 			ntpServers[i].IsSelected = true
-			fmt.Printf("已标记NTP服务器 %s 为选中状态\n", server.Address)
+			fmt.Printf("已标记NTP服务器：%s 为选中状态\n", server.Address)
 			break // 只标记选中的服务器，其他服务器保持不变
 		}
 	}
@@ -435,8 +444,11 @@ func queryMultiSyncTimestamp() (int64, error) {
 	// 使用找到的最佳服务器结果
 	syncTimestamp := lastResult.Timestamp
 
-	logger.Info("TimeService", fmt.Sprintf("NTP同步完成，使用服务器 %s，成功样本数: %d，往返时间: %s，偏差: %s\n",
-		lastResult.Address, lastResult.SuccessCount, FormatNanoseconds(int64(lastResult.RTT)), FormatNanoseconds(int64(lastResult.Deviation))))
+	// 直接使用FormatNanoseconds函数，它会处理正负号
+	finalDeviationDesc := FormatNanoseconds(int64(lastResult.Deviation))
+
+	logger.Info("TimeService", fmt.Sprintf("NTP同步完成，使用服务器：%s，成功样本数：%d，往返时间：%s，偏差：%s\n",
+		lastResult.Address, lastResult.SuccessCount, FormatNanoseconds(int64(lastResult.RTT)), finalDeviationDesc))
 	return syncTimestamp, nil
 }
 
@@ -448,11 +460,14 @@ func updateSyncTimestampOffset() error {
 		return err
 	}
 
-	// 计算新的偏移量
-	newSyncTimestampOffset := syncTimestamp - processStartTimestamp
+	// 获取当前系统时间基准
+	systemTimestampBase := clock.Now().UnixNano()
+
+	// 计算新的偏移量（NTP时间与系统时间的差值）
+	calcSyncTimestampOffset := syncTimestamp - systemTimestampBase
 
 	// 更新偏移量
-	atomic.StoreInt64(&syncTimestampOffset, newSyncTimestampOffset)
+	atomic.StoreInt64(&syncTimestampOffset, calcSyncTimestampOffset)
 
 	return nil
 }
@@ -482,7 +497,7 @@ func syncCircuitBreaker() {
 		syncEndTime := clock.GetMonotonicTimestamp()
 		syncDuration := syncEndTime - syncStartTimestamp
 
-		logger.Info("TimeService", fmt.Sprintf("NTP同步失败，耗时: %s，错误: %v\n", FormatNanoseconds(syncDuration), err))
+		logger.Info("TimeService", fmt.Sprintf("NTP同步失败，耗时：%s，错误：%v\n", FormatNanoseconds(syncDuration), err))
 		atomic.AddInt64(&stats.FailedSyncs, 1)
 		atomic.AddInt64(&circuitBreaker.FailureCount, 1)
 		circuitBreaker.LastFailureTime = clock.Now()
@@ -503,7 +518,7 @@ func syncCircuitBreaker() {
 		atomic.AddInt64(&circuitBreaker.SuccessCount, 1)
 		status.LastSyncTime = clock.Now()
 
-		logger.Info("TimeService", fmt.Sprintf("NTP同步成功，耗时: %s\n", FormatNanoseconds(syncDuration)))
+		logger.Info("TimeService", fmt.Sprintf("NTP同步成功，耗时：%s\n", FormatNanoseconds(syncDuration)))
 
 		// 如果之前是降级模式，现在恢复
 		if status.IsDegraded {
@@ -522,7 +537,7 @@ func syncCircuitBreaker() {
 
 // startNTPSyncLoop 启动NTP同步循环
 func startNTPSyncLoop() {
-	logger.Info("TimeService", fmt.Sprintf("启动NTP同步循环，间隔: %v\n", timeServiceConfig.SyncInterval))
+	logger.Info("TimeService", fmt.Sprintf("启动NTP同步循环，间隔：%v\n", timeServiceConfig.SyncInterval))
 
 	ticker := time.NewTicker(timeServiceConfig.SyncInterval)
 	defer ticker.Stop()
@@ -538,7 +553,7 @@ func startNTPSyncLoop() {
 		syncEndTime := clock.GetMonotonicTimestamp()
 		syncDuration := syncEndTime - syncStartTime
 
-		logger.Info("TimeService", fmt.Sprintf("NTP同步循环执行完成，耗时: %s\n", FormatNanoseconds(syncDuration)))
+		logger.Info("TimeService", fmt.Sprintf("NTP同步循环执行完成，耗时：%s\n", FormatNanoseconds(syncDuration)))
 	}
 }
 
@@ -574,11 +589,28 @@ func GetSyncTimestampOffset() int64 {
 }
 
 // GetSyncTimestamp 获取当前同步时间
+// 在正常模式下，返回NTP同步时间
+// 在降级模式下，返回基于程序开始时间的单调时间，确保交易系统时序正确
 func GetSyncTimestamp() time.Time {
-	// 获取系统时间戳
+	// 检查是否处于降级模式
+	if status.IsDegraded {
+		// 降级模式：使用基于程序开始时间基准
+		// 这确保了即使在NTP同步失败的情况下，交易系统仍能运行在正确的时序中
+		// 获取当前单调时间戳
+		currentMonotonicTimestamp := clock.GetMonotonicTimestamp()
+
+		// 通过使用单调时间差，确保时间间隔是准确的
+		monotonicTimestampDuration := currentMonotonicTimestamp - processStartTimestampBase
+
+		// 这样可以确保在降级模式下，时间仍然保持单调递增
+		return time.Unix(0, processStartSystemTimestamp+monotonicTimestampDuration)
+	}
+
+	// 正常模式：使用NTP同步时间
+	// 获取系统时间戳基准
 	systemTimestampBase := clock.Now().UnixNano()
 
-	// 计算同步时间戳：系统时间戳 + 时间偏移量
+	// 计算同步时间戳：系统时间戳基准 + 时间偏移量
 	syncTimestamp := systemTimestampBase + GetSyncTimestampOffset()
 
 	// 转换为time.Time对象
@@ -638,8 +670,15 @@ func InitTimeServiceSystem() error {
 	logger.Info("TimeService", "初始化时间服务系统...\n")
 	fmt.Printf("初始化时间服务系统...\n")
 
-	// 1. 记录单调时钟起点
-	processStartTimestamp = clock.GetMonotonicTimestamp()
+	// 获取当前系统时间基准
+	systemTimestampBase := clock.Now().UnixNano()
+	systemTime := time.Unix(0, systemTimestampBase)
+	systemTimeFormatted := clock.Format(systemTime)
+
+	// 1. 记录程序开始时间基准
+	processStartTimestampBase = clock.GetMonotonicTimestamp()
+	// 记录程序开始时的系统时间，用于降级模式转换和审计
+	processStartSystemTimestamp = systemTimestampBase
 
 	// 2. 同步多源NTP获取同步时间
 	syncTimestamp, err := queryMultiSyncTimestamp()
@@ -650,14 +689,14 @@ func InitTimeServiceSystem() error {
 	if err != nil {
 		// 首次同步失败
 		atomic.AddInt64(&stats.FailedSyncs, 1)
-		logger.Info("TimeService", fmt.Sprintf("初始化NTP同步失败: %v\n", err))
-		fmt.Printf("初始化NTP同步失败: %v\n", err)
-		return fmt.Errorf("初始化NTP同步失败: %v", err)
+		logger.Info("TimeService", fmt.Sprintf("初始化NTP同步失败，系统时间：%s，错误：%v\n", systemTimeFormatted, err))
+		fmt.Printf("初始化NTP同步失败，系统时间：%s，错误：%v\n", systemTimeFormatted, err)
+		return fmt.Errorf("初始化NTP同步失败：%v", err)
 	}
 
-	// 计算基准偏移量
-	newSyncTimestampOffset := syncTimestamp - processStartTimestamp
-	atomic.StoreInt64(&syncTimestampOffset, newSyncTimestampOffset)
+	// 计算基准偏移量（NTP时间与系统时间的差值）
+	calcSyncTimestampOffset := syncTimestamp - systemTimestampBase
+	atomic.StoreInt64(&syncTimestampOffset, calcSyncTimestampOffset)
 
 	// 更新统计计数器 - 首次同步成功
 	atomic.AddInt64(&stats.SuccessfulSyncs, 1)
@@ -665,10 +704,10 @@ func InitTimeServiceSystem() error {
 	// 4. 更新状态
 	status.IsInitialized = true
 	status.IsDegraded = false
-	status.LastSyncTime = clock.Now()
+	status.LastSyncTime = systemTime
 
-	logger.Info("TimeService", fmt.Sprintf("时间服务系统初始化成功，初始偏移量: %s\n", FormatNanoseconds(newSyncTimestampOffset)))
-	fmt.Printf("时间服务系统初始化成功，初始偏移量: %.7fs\n", float64(newSyncTimestampOffset)/1e9)
+	logger.Info("TimeService", fmt.Sprintf("时间服务系统初始化成功，系统时间：%s，时间偏移量：%s\n", systemTimeFormatted, FormatNanoseconds(calcSyncTimestampOffset)))
+	fmt.Printf("时间服务系统初始化成功，系统时间：%s，时间偏移量：%.7fs\n", systemTimeFormatted, float64(calcSyncTimestampOffset)/1e9)
 
 	// 5. 启动定时NTP同步
 	go startNTPSyncLoop()
