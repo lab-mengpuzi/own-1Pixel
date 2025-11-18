@@ -568,7 +568,7 @@ class TimeService {
             unit = 's';
         }
         
-        return `${value.toFixed(precision)} ${unit}`;
+        return `${value >= 0 ? '+' : ''}${value.toFixed(precision)} ${unit}`;
     }
 
     // 显示成功消息

@@ -74,16 +74,20 @@ func GetSyncTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 获取系统时间
+	systemTime := clock.Now()
+
 	// 检查时间服务是否已初始化
 	status := GetTimeServiceStatus()
 	if !status.IsInitialized {
 		// 时间服务未初始化，返回系统时间（降级模式）
-		systemTime := SyncNow()
+		// 使用SyncNow函数，它会自动处理降级模式
+		syncTimestamp := SyncNow()
 		response := TimeServiceASyncTimeResponse{
 			SystemTime:     clock.Format(systemTime),
-			SyncTimestamp:  systemTime.UnixNano(),
-			SyncTime:       clock.Format(systemTime),
-			SyncTimeOffset: 0,
+			SyncTimestamp:  syncTimestamp.UnixNano(),
+			SyncTime:       clock.Format(syncTimestamp),
+			SyncTimeOffset: 0, // 未初始化时偏移量为0
 			IsDegraded:     true,
 		}
 
@@ -93,17 +97,16 @@ func GetSyncTime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取同步时间
-	systemTime := clock.Format(clock.Now())
-	syncTimestamp := GetSyncTimestamp()
-	syncTime := syncTimestamp.UnixNano()
+	systemTimeFormatted := clock.Format(systemTime)
+	syncTimestamp := GetSyncTimestamp() // 这个函数现在内置了降级模式处理
 	syncTimeOffset := GetSyncTimestampOffset()
 	isDegraded := IsInDegradedMode()
 	syncTimeFormatted := clock.Format(syncTimestamp)
 
 	// 构建响应
 	response := TimeServiceASyncTimeResponse{
-		SystemTime:     systemTime,
-		SyncTimestamp:  syncTime,
+		SystemTime:     systemTimeFormatted,
+		SyncTimestamp:  syncTimestamp.UnixNano(), // 修正：直接使用UnixNano()获取纳秒级时间戳
 		SyncTime:       syncTimeFormatted,
 		SyncTimeOffset: syncTimeOffset,
 		IsDegraded:     isDegraded,
