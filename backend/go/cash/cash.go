@@ -54,21 +54,15 @@ func InitDatabase(dbConn *sql.DB) error {
 
 	if _, dbCheckErr := os.Stat(cashConfig.DbPath); dbCheckErr == nil {
 		// 数据库文件存在，检查表结构是否匹配
-		tempDB, dbOpenErr := sql.Open("sqlite", cashConfig.DbPath)
-		if dbOpenErr != nil {
-			return dbOpenErr
-		}
-
 		// 检查transactions表是否存在
 		var tableName string
-		err = tempDB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").Scan(&tableName)
+		err = dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").Scan(&tableName)
 		tableExists := err == nil
 
 		if tableExists {
 			// 检查transactions表结构是否匹配
-			rows, pragmaQueryErr := tempDB.Query("PRAGMA table_info(transactions)")
+			rows, pragmaQueryErr := dbConn.Query("PRAGMA table_info(transactions)")
 			if pragmaQueryErr != nil {
-				tempDB.Close()
 				return pragmaQueryErr
 			}
 			defer rows.Close()
@@ -84,7 +78,6 @@ func InitDatabase(dbConn *sql.DB) error {
 				var pk int
 				err = rows.Scan(&cid, &name, &dataType, &notNull, &dfltValue, &pk)
 				if err != nil {
-					tempDB.Close()
 					return err
 				}
 				columns = append(columns, name)
@@ -111,17 +104,15 @@ func InitDatabase(dbConn *sql.DB) error {
 				}
 			}
 
-			// 检查balance列是否有NOT NULL约束
+			// 检查balance列的NOT NULL约束
 			if !needsMigration && columnTypes["balance"] != "" {
 				// 检查balance列的NOT NULL约束
 				var notNull int
-				err = tempDB.QueryRow("SELECT NOT NULL FROM pragma_table_info('transactions') WHERE name='balance'").Scan(&notNull)
+				err = dbConn.QueryRow("SELECT NOT NULL FROM pragma_table_info('transactions') WHERE name='balance'").Scan(&notNull)
 				if err == nil && notNull == 1 {
 					needsMigration = true
 				}
 			}
-
-			tempDB.Close()
 
 			if needsMigration {
 				// 备份旧数据库文件
@@ -142,8 +133,6 @@ func InitDatabase(dbConn *sql.DB) error {
 					return fmt.Errorf("删除旧数据库文件失败: %v", err)
 				}
 			}
-		} else {
-			tempDB.Close()
 		}
 	}
 
