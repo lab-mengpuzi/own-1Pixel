@@ -1,8 +1,6 @@
 module own-1Pixel
 
-go 1.23.4
-
-toolchain go1.24.10
+go 1.25.0
 
 require github.com/tursodatabase/turso-go v0.2.0
 

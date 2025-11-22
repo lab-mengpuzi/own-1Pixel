@@ -5,7 +5,7 @@
 Windows 10 -> version
 
 ```plain
-golang-windows 1.21.0
+golang-windows 1.25.0
 ```
 
 Windows 10 -> run
