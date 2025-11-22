@@ -10,8 +10,6 @@ import (
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/timeservice"
-
-	_ "modernc.org/sqlite"
 )
 
 // 全局变量，用于存储价格递减定时器
@@ -48,11 +46,11 @@ type AuctionBid struct {
 }
 
 // 初始化荷兰钟拍卖数据库表
-func InitAuctionDatabase(db *sql.DB) error {
+func InitAuctionDatabase(dbConn *sql.DB) error {
 	logger.Info("auction", "初始化荷兰钟拍卖数据库表\n")
 
 	// 创建荷兰钟拍卖表
-	_, err := db.Exec(`
+	_, err := dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS auctions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			item_type TEXT NOT NULL,
@@ -76,7 +74,7 @@ func InitAuctionDatabase(db *sql.DB) error {
 	}
 
 	// 创建荷兰钟竞价记录表
-	_, err = db.Exec(`
+	_, err = dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS auction_bids (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			auction_id INTEGER NOT NULL,
@@ -96,7 +94,7 @@ func InitAuctionDatabase(db *sql.DB) error {
 	logger.Info("auction", "荷兰钟拍卖数据库表初始化完成\n")
 
 	// 恢复进行中的拍卖
-	recoverActiveAuctions(db)
+	recoverActiveAuctions(dbConn)
 
 	return nil
 }

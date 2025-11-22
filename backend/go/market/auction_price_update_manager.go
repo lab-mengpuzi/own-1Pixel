@@ -22,10 +22,10 @@ type AuctionCacheItem struct {
 
 // WebSocket价格更新管理器
 type AuctionPriceUpdateManager struct {
-	db               *sql.DB
+	dbConn           *sql.DB
+	mutex            sync.Mutex
 	auctionWSManager *AuctionWSManager
 	isRunning        bool
-	mu               sync.Mutex
 	stopChan         chan bool
 	updateInterval   time.Duration
 	// 添加拍卖缓存
@@ -34,13 +34,13 @@ type AuctionPriceUpdateManager struct {
 }
 
 // 创建新的价格更新管理器
-func InitAuctionWSPriceUpdateManager(db *sql.DB, auctionWSManager *AuctionWSManager) *AuctionPriceUpdateManager {
+func InitAuctionWSPriceUpdateManager(dbConn *sql.DB, auctionWSManager *AuctionWSManager) *AuctionPriceUpdateManager {
 	// 获取全局配置实例
 	_config := config.GetConfig()
 	auctionConfig := _config.Auction
 
 	return &AuctionPriceUpdateManager{
-		db:               db,
+		dbConn:           dbConn,
 		auctionWSManager: auctionWSManager,
 		isRunning:        false,
 		stopChan:         make(chan bool),
@@ -51,8 +51,8 @@ func InitAuctionWSPriceUpdateManager(db *sql.DB, auctionWSManager *AuctionWSMana
 
 // 启动价格更新管理器
 func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) StartAuctionWSPriceUpdateManager() {
-	auctionWSPriceUpdateManager.mu.Lock()
-	defer auctionWSPriceUpdateManager.mu.Unlock()
+	auctionWSPriceUpdateManager.mutex.Lock()
+	defer auctionWSPriceUpdateManager.mutex.Unlock()
 
 	if auctionWSPriceUpdateManager.isRunning {
 		return
@@ -68,8 +68,8 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) StartAuctionWSPric
 
 // 停止价格更新管理器
 func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) StopAuctionWSPriceUpdateManager() {
-	auctionWSPriceUpdateManager.mu.Lock()
-	defer auctionWSPriceUpdateManager.mu.Unlock()
+	auctionWSPriceUpdateManager.mutex.Lock()
+	defer auctionWSPriceUpdateManager.mutex.Unlock()
 
 	if !auctionWSPriceUpdateManager.isRunning {
 		return
@@ -99,7 +99,7 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) handleAuctionPrice
 // 更新活跃拍卖的价格
 func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateActiveAuctionPrices() {
 	// 使用事务来减少数据库锁定时间
-	tx, err := auctionWSPriceUpdateManager.db.Begin()
+	tx, err := auctionWSPriceUpdateManager.dbConn.Begin()
 	if err != nil {
 		logger.Info("auction_price_update_manager", fmt.Sprintf("开始事务失败: %v\n", err))
 		return
@@ -388,8 +388,8 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) calculateTimeRemai
 
 // 检查管理器是否正在运行
 func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) IsRunning() bool {
-	auctionWSPriceUpdateManager.mu.Lock()
-	defer auctionWSPriceUpdateManager.mu.Unlock()
+	auctionWSPriceUpdateManager.mutex.Lock()
+	defer auctionWSPriceUpdateManager.mutex.Unlock()
 	return auctionWSPriceUpdateManager.isRunning
 }
 

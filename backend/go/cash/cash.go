@@ -13,8 +13,6 @@ import (
 	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/timeservice"
-
-	_ "modernc.org/sqlite"
 )
 
 // 交易记录结构
@@ -40,7 +38,7 @@ type Balance struct {
 }
 
 // 初始化数据库
-func InitDatabase(db *sql.DB) error {
+func InitDatabase(dbConn *sql.DB) error {
 	// 获取全局配置实例
 	_config := config.GetConfig()
 	cashConfig := _config.Cash
@@ -150,7 +148,7 @@ func InitDatabase(db *sql.DB) error {
 	}
 
 	// 创建交易记录表
-	_, err = db.Exec(`
+	_, err = dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS transactions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			transaction_time DATETIME NOT NULL,
@@ -171,7 +169,7 @@ func InitDatabase(db *sql.DB) error {
 	}
 
 	// 创建余额表
-	_, err = db.Exec(`
+	_, err = dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS balance (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			amount REAL NOT NULL,
@@ -185,14 +183,14 @@ func InitDatabase(db *sql.DB) error {
 
 	// 检查是否有余额记录，如果没有则初始化
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM balance").Scan(&count)
+	err = dbConn.QueryRow("SELECT COUNT(*) FROM balance").Scan(&count)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("查询余额记录数量失败: %v\n", err))
 		return err
 	}
 
 	if count == 0 {
-		_, err = db.Exec("INSERT INTO balance (amount) VALUES (0)")
+		_, err = dbConn.Exec("INSERT INTO balance (amount) VALUES (0)")
 		if err != nil {
 			logger.Info("cash", fmt.Sprintf("初始化余额记录失败: %v\n", err))
 			return err
