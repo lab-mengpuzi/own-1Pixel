@@ -17,32 +17,32 @@ import (
 	"own-1Pixel/backend/go/timeservice/clock"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/tursodatabase/turso-go"
 )
 
 //go:embed frontend/*
 var frontendFS embed.FS                                         // 静态资源二进制化
-var db *sql.DB                                                  // 数据库对象
+var dbConn *sql.DB                                              // 数据库对象
 var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
 var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
 
 // 初始化数据库
 func initDatabase() error {
-	err := cash.InitDatabase(db)
+	err := cash.InitDatabase(dbConn)
 	if err != nil {
 		logger.Info("initDatabase", fmt.Sprintf("初始化现金数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化市场数据库
-	err = market.InitMarketDatabase(db)
+	err = market.InitMarketDatabase(dbConn)
 	if err != nil {
 		logger.Info("initDatabase", fmt.Sprintf("初始化市场数据库失败 -> %v\n", err))
 		return err
 	}
 
 	// 初始化荷兰钟拍卖数据库
-	err = market.InitAuctionDatabase(db)
+	err = market.InitAuctionDatabase(dbConn)
 	if err != nil {
 		logger.Info("initDatabase", fmt.Sprintf("初始化荷兰钟拍卖数据库失败 -> %v\n", err))
 		return err
@@ -53,76 +53,76 @@ func initDatabase() error {
 
 // 获取当前余额
 func getBalance(w http.ResponseWriter, r *http.Request) {
-	cash.GetBalance(db, w, r)
+	cash.GetBalance(dbConn, w, r)
 }
 
 // 获取所有交易记录
 func getTransactions(w http.ResponseWriter, r *http.Request) {
-	cash.GetTransactions(db, w, r)
+	cash.GetTransactions(dbConn, w, r)
 }
 
 // 添加交易记录
 func addTransaction(w http.ResponseWriter, r *http.Request) {
-	cash.AddTransaction(db, w, r)
+	cash.AddTransaction(dbConn, w, r)
 }
 
 // 获取市场参数
 func getMarketParams(w http.ResponseWriter, r *http.Request) {
-	market.GetMarketParams(db, w, r)
+	market.GetMarketParams(dbConn, w, r)
 }
 
 // 保存市场参数
 func saveMarketParams(w http.ResponseWriter, r *http.Request) {
-	market.SaveMarketParams(db, w, r)
+	market.SaveMarketParams(dbConn, w, r)
 }
 
 // 获取背包状态
 func getBackpack(w http.ResponseWriter, r *http.Request) {
-	market.GetBackpack(db, w, r)
+	market.GetBackpack(dbConn, w, r)
 }
 
 // 获取市场物品
 func getMarketItems(w http.ResponseWriter, r *http.Request) {
-	market.GetMarketItems(db, w, r)
+	market.GetMarketItems(dbConn, w, r)
 }
 
 // 制作苹果
 func makeApple(w http.ResponseWriter, r *http.Request) {
-	market.MakeItem(db, w, r, "apple")
+	market.MakeItem(dbConn, w, r, "apple")
 }
 
 // 制作木材
 func makeWood(w http.ResponseWriter, r *http.Request) {
-	market.MakeItem(db, w, r, "wood")
+	market.MakeItem(dbConn, w, r, "wood")
 }
 
 // 卖出苹果
 func sellApple(w http.ResponseWriter, r *http.Request) {
-	market.SellItem(db, w, r, "apple")
+	market.SellItem(dbConn, w, r, "apple")
 }
 
 // 卖出木材
 func sellWood(w http.ResponseWriter, r *http.Request) {
-	market.SellItem(db, w, r, "wood")
+	market.SellItem(dbConn, w, r, "wood")
 }
 
 // 买入苹果
 func buyApple(w http.ResponseWriter, r *http.Request) {
-	market.BuyItem(db, w, r, "apple")
+	market.BuyItem(dbConn, w, r, "apple")
 }
 
 // 买入木材
 func buyWood(w http.ResponseWriter, r *http.Request) {
-	market.BuyItem(db, w, r, "wood")
+	market.BuyItem(dbConn, w, r, "wood")
 }
 
 // 创建荷兰钟拍卖
 func createAuction(w http.ResponseWriter, r *http.Request) {
-	market.CreateAuction(db, w, r)
+	market.CreateAuction(dbConn, w, r)
 
 	// 通过WebSocket广播拍卖列表更新
 	if auctionWSManager != nil {
-		auctions, err := market.GetActiveAuctions(db)
+		auctions, err := market.GetActiveAuctions(dbConn)
 		if err == nil && len(auctions) > 0 {
 			// 广播最新创建的拍卖
 			auctionWSManager.BroadcastAuctionWSUpdate(&auctions[0], "created")
@@ -132,12 +132,12 @@ func createAuction(w http.ResponseWriter, r *http.Request) {
 
 // 获取所有荷兰钟拍卖
 func getAuctions(w http.ResponseWriter, r *http.Request) {
-	market.GetAuctions(db, w, r)
+	market.GetAuctions(dbConn, w, r)
 }
 
 // 获取单个荷兰钟拍卖
 func getAuction(w http.ResponseWriter, r *http.Request) {
-	market.GetAuction(db, w, r)
+	market.GetAuction(dbConn, w, r)
 }
 
 // 开始荷兰钟拍卖
@@ -160,11 +160,11 @@ func startAuction(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 调用market.StartAuction
-	market.StartAuction(db, w, r)
+	market.StartAuction(dbConn, w, r)
 
 	// 通过WebSocket广播拍卖更新
 	if auctionWSManager != nil && auctionID > 0 {
-		auction, err := market.GetAuctionID(db, auctionID)
+		auction, err := market.GetAuctionID(dbConn, auctionID)
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "started")
 
@@ -196,11 +196,11 @@ func CommitAuctionBid(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 调用market.CommitAuctionBid
-	market.CommitAuctionBid(db, w, r)
+	market.CommitAuctionBid(dbConn, w, r)
 
 	// 通过WebSocket广播拍卖更新
 	if auctionWSManager != nil && auctionID > 0 {
-		auction, err := market.GetAuctionID(db, auctionID)
+		auction, err := market.GetAuctionID(dbConn, auctionID)
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "bid_placed")
 		}
@@ -227,11 +227,11 @@ func cancelAuction(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 调用market.CancelAuction
-	market.CancelAuction(db, w, r)
+	market.CancelAuction(dbConn, w, r)
 
 	// 通过WebSocket广播拍卖更新
 	if auctionWSManager != nil && auctionID > 0 {
-		auction, err := market.GetAuctionID(db, auctionID)
+		auction, err := market.GetAuctionID(dbConn, auctionID)
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "cancelled")
 		}
@@ -258,11 +258,11 @@ func pauseAuction(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 调用market.PauseAuction
-	market.PauseAuction(db, w, r)
+	market.PauseAuction(dbConn, w, r)
 
 	// 通过WebSocket广播拍卖更新
 	if auctionWSManager != nil && auctionID > 0 {
-		auction, err := market.GetAuctionID(db, auctionID)
+		auction, err := market.GetAuctionID(dbConn, auctionID)
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "paused")
 		}
@@ -271,12 +271,12 @@ func pauseAuction(w http.ResponseWriter, r *http.Request) {
 
 // 获取卖家荷兰钟拍卖列表
 func getSellerAuctions(w http.ResponseWriter, r *http.Request) {
-	market.GetSellerAuctions(db, w, r)
+	market.GetSellerAuctions(dbConn, w, r)
 }
 
 // 重新激活荷兰钟拍卖
 func reactivateAuction(w http.ResponseWriter, r *http.Request) {
-	market.ReactivateAuction(db, w, r)
+	market.ReactivateAuction(dbConn, w, r)
 }
 
 func main() {
@@ -302,8 +302,7 @@ func main() {
 	}
 
 	// 打开数据库连接
-	// 添加SQLite特定参数以提高并发性能
-	db, err = sql.Open("sqlite", fmt.Sprintf("%s?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL&_timeout=5000", _config.Cash.DbPath))
+	dbConn, err = sql.Open("turso", _config.Cash.DbPath) // Turso 基于 Rust 重构 sqlite3，提高并发性能
 	if err != nil {
 		logger.Info("main", fmt.Sprintf("打开数据库失败 -> %v\n", err))
 		fmt.Printf("打开数据库失败 -> %v\n", err)
@@ -311,9 +310,9 @@ func main() {
 	}
 
 	// 设置连接池参数，提高并发性能
-	db.SetMaxOpenConns(25)                 // 设置最大打开连接数
-	db.SetMaxIdleConns(10)                 // 设置最大空闲连接数
-	db.SetConnMaxLifetime(5 * time.Minute) // 设置连接最大生存时间
+	dbConn.SetMaxOpenConns(1)                  // 设置最大打开连接数
+	dbConn.SetMaxIdleConns(1)                  // 设置最大空闲连接数
+	dbConn.SetConnMaxLifetime(1 * time.Minute) // 设置连接最大生存时间
 
 	// 初始化数据库
 	err = initDatabase()
@@ -322,14 +321,14 @@ func main() {
 		fmt.Printf("初始化数据库失败 -> %v\n", err)
 		return
 	}
-	defer db.Close()
+	defer dbConn.Close()
 	fmt.Printf("初始化数据库配置文件...[%s]\n", _config.Cash.DbPath)
 
 	// 初始化WebSocket管理器
-	auctionWSManager = market.InitAuctionWSManager(db)
+	auctionWSManager = market.InitAuctionWSManager(dbConn)
 
 	// 初始化价格更新管理器
-	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(db, auctionWSManager)
+	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(dbConn, auctionWSManager)
 
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")

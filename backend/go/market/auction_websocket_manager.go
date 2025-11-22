@@ -17,8 +17,8 @@ import (
 // WebSocket连接管理器
 type AuctionWSManager struct {
 	connections map[*websocket.Conn]bool
-	mu          sync.Mutex
-	db          *sql.DB
+	dbConn      *sql.DB
+	mutex       sync.Mutex
 }
 
 // WebSocket消息结构
@@ -54,10 +54,10 @@ type AuctionWSBidResultMessage struct {
 }
 
 // 创建新的WebSocket管理器
-func InitAuctionWSManager(db *sql.DB) *AuctionWSManager {
+func InitAuctionWSManager(dbConn *sql.DB) *AuctionWSManager {
 	return &AuctionWSManager{
 		connections: make(map[*websocket.Conn]bool),
-		db:          db,
+		dbConn:      dbConn,
 	}
 }
 
@@ -92,10 +92,10 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 	})
 
 	// 添加连接到管理器
-	auctionWSManager.mu.Lock()
+	auctionWSManager.mutex.Lock()
 	auctionWSManager.connections[conn] = true
 	connectionCount := len(auctionWSManager.connections)
-	auctionWSManager.mu.Unlock()
+	auctionWSManager.mutex.Unlock()
 
 	logger.Info("websocket", fmt.Sprintf("新的WebSocket连接已建立，当前连接数: %d\n", connectionCount))
 
@@ -126,10 +126,10 @@ func (auctionWSManager *AuctionWSManager) HandleAuctionWebSocket(w http.Response
 	}
 
 	// 连接关闭时清理
-	auctionWSManager.mu.Lock()
+	auctionWSManager.mutex.Lock()
 	delete(auctionWSManager.connections, conn)
 	connectionCount = len(auctionWSManager.connections)
-	auctionWSManager.mu.Unlock()
+	auctionWSManager.mutex.Unlock()
 
 	logger.Info("websocket", fmt.Sprintf("WebSocket连接已关闭，当前连接数: %d\n", connectionCount))
 }
@@ -209,7 +209,7 @@ func (auctionWSManager *AuctionWSManager) handleAuctionClientMessage(conn *webso
 
 // 发送活跃拍卖列表
 func (auctionWSManager *AuctionWSManager) sendActiveAuctions(conn *websocket.Conn) {
-	auctions, err := GetActiveAuctions(auctionWSManager.db)
+	auctions, err := GetActiveAuctions(auctionWSManager.dbConn)
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("获取活跃拍卖失败: %v\n", err))
 		return
@@ -237,7 +237,7 @@ func (auctionWSManager *AuctionWSManager) sendActiveAuctions(conn *websocket.Con
 
 // 发送特定拍卖详情
 func (auctionWSManager *AuctionWSManager) sendAuctionDetails(conn *websocket.Conn, auctionID int) {
-	auction, err := GetAuctionID(auctionWSManager.db, auctionID)
+	auction, err := GetAuctionID(auctionWSManager.dbConn, auctionID)
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("获取拍卖详情失败: %v\n", err))
 		return
@@ -283,7 +283,7 @@ func (auctionWSManager *AuctionWSManager) handleAuctionBidRequest(conn *websocke
 	}
 
 	// 处理竞价
-	success, message, err := ProcessAuctionBid(auctionWSManager.db, int(auctionID), int(userID), price, int(quantity))
+	success, message, err := ProcessAuctionBid(auctionWSManager.dbConn, int(auctionID), int(userID), price, int(quantity))
 	if err != nil {
 		logger.Info("websocket", fmt.Sprintf("处理竞价失败: %v\n", err))
 		auctionWSManager.sendAuctionWSBidResult(conn, int(userID), false, "竞价处理失败", 0, 0)
@@ -295,7 +295,7 @@ func (auctionWSManager *AuctionWSManager) handleAuctionBidRequest(conn *websocke
 
 	// 如果竞价成功，广播拍卖更新
 	if success {
-		auction, err := GetAuctionID(auctionWSManager.db, int(auctionID))
+		auction, err := GetAuctionID(auctionWSManager.dbConn, int(auctionID))
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "bid_placed")
 		}
@@ -347,8 +347,8 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 		SendTime:  now,
 	}
 
-	auctionWSManager.mu.Lock()
-	defer auctionWSManager.mu.Unlock()
+	auctionWSManager.mutex.Lock()
+	defer auctionWSManager.mutex.Unlock()
 
 	// 创建临时连接列表，避免在迭代过程中修改原map
 	connections := make([]*websocket.Conn, 0, len(auctionWSManager.connections))
@@ -420,8 +420,8 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 		SendTime:  now,
 	}
 
-	auctionWSManager.mu.Lock()
-	defer auctionWSManager.mu.Unlock()
+	auctionWSManager.mutex.Lock()
+	defer auctionWSManager.mutex.Unlock()
 
 	// 创建临时连接列表，避免在迭代过程中修改原map
 	connections := make([]*websocket.Conn, 0, len(auctionWSManager.connections))
@@ -473,8 +473,8 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 
 // 获取连接数
 func (auctionWSManager *AuctionWSManager) GetAuctionWSConnectionCount() int {
-	auctionWSManager.mu.Lock()
-	defer auctionWSManager.mu.Unlock()
+	auctionWSManager.mutex.Lock()
+	defer auctionWSManager.mutex.Unlock()
 	return len(auctionWSManager.connections)
 }
 
