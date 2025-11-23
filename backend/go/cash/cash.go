@@ -52,15 +52,14 @@ func InitDatabase(dbConn *sql.DB) error {
 		os.MkdirAll(dbDir, 0755)
 	}
 
+	// 数据库文件存在，检查表结构是否匹配
 	if _, dbCheckErr := os.Stat(cashConfig.DbPath); dbCheckErr == nil {
-		// 数据库文件存在，检查表结构是否匹配
-		// 检查transactions表是否存在
 		var tableName string
 		err = dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").Scan(&tableName)
 		tableExists := err == nil
 
+		// 检查transactions表是否存在
 		if tableExists {
-			// 检查transactions表结构是否匹配
 			rows, pragmaQueryErr := dbConn.Query("PRAGMA table_info(transactions)")
 			if pragmaQueryErr != nil {
 				return pragmaQueryErr
@@ -69,6 +68,8 @@ func InitDatabase(dbConn *sql.DB) error {
 
 			var columns []string
 			var columnTypes map[string]string = make(map[string]string)
+
+			// 检查transactions表结构是否匹配
 			for rows.Next() {
 				var cid int
 				var name string
@@ -106,7 +107,6 @@ func InitDatabase(dbConn *sql.DB) error {
 
 			// 检查balance列的NOT NULL约束
 			if !needsMigration && columnTypes["balance"] != "" {
-				// 检查balance列的NOT NULL约束
 				var notNull int
 				err = dbConn.QueryRow("SELECT NOT NULL FROM pragma_table_info('transactions') WHERE name='balance'").Scan(&notNull)
 				if err == nil && notNull == 1 {

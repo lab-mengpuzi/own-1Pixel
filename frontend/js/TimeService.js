@@ -62,9 +62,9 @@ class TimeService {
                 </div>
                 <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <h3 class="text-lg font-medium text-gray-700 mb-2">时间偏移量</h3>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">同步时间偏移量</h3>
                         <p id="sync-time-offset" class="text-gray-600">加载中...</p>
-                        <p class="text-sm text-gray-500">同步时间戳与程序启动时间戳的偏移</p>
+                        <p class="text-sm text-gray-500">同步时间偏移量 = 同步时间戳 - 系统时间戳基准</p>
                     </div>
                     <div>
                         <h3 class="text-lg font-medium text-gray-700 mb-2">服务模式</h3>

@@ -23,7 +23,7 @@ var (
 	circuitBreaker              TimeServiceCircuitBreakerState    // 熔断器状态
 	lastNTPSamples              map[string][]TimeServiceNTPSample // 上一次获取的NTP样本数据，按服务器地址存储
 	lastNTPSamplesMutex         sync.RWMutex                      // 保护lastNTPSamples的读写锁
-	syncTimestampOffset         int64                             // 同步时间偏移量（syncTimestamp - systemTimestampBase）
+	syncTimestampOffset         int64                             // 同步时间偏移量（syncTimestampOffset = syncTimestamp - systemTimestampBase）
 	stats                       TimeServiceStats                  // 统计信息
 )
 
@@ -199,18 +199,6 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPTimeResult,
 		}
 	}
 
-	// 选择最佳样本用于时间计算
-	// 优先选择RTT最小的成功样本
-	if len(samples) > 0 {
-		// 按RTT排序
-		sort.Slice(samples, func(i, j int) bool {
-			return samples[i].RTT < samples[j].RTT
-		})
-	}
-
-	// 按时间戳排序样本
-	sort.Slice(samples, func(i, j int) bool { return samples[i].Timestamp < samples[j].Timestamp })
-
 	// 初始化变量，确保在所有代码路径中都有定义
 	var firstTimestamp int64   // 修改：使用第一个成功样本的时间戳
 	var firstAddress string    // 修改：使用第一个成功样本的地址
@@ -220,6 +208,23 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPTimeResult,
 
 	// 记录采样完成后的综合日志，包含失败和无效源统计
 	if len(samples) > 0 {
+		// 按Deviation符号排序：为正，升序；为负，降序
+		sort.Slice(samples, func(i, j int) bool {
+			// 如果两个样本的偏差符号不同，先按符号排序
+			if (samples[i].Deviation >= 0) != (samples[j].Deviation >= 0) {
+				// 负偏差（系统时间慢）排在前面
+				return samples[i].Deviation < 0
+			}
+			// 如果偏差符号相同，则按绝对值排序
+			// 正偏差：升序（从小到大）
+			// 负偏差：降序（从大到小，即绝对值从小到大）
+			if samples[i].Deviation >= 0 {
+				return samples[i].Deviation < samples[j].Deviation
+			} else {
+				return samples[i].Deviation > samples[j].Deviation
+			}
+		})
+
 		// 查找第一个成功样本的时间戳、偏差和RTT
 		for i := 0; i < len(samples); i++ {
 			if samples[i].Status == "Success" {
