@@ -214,14 +214,14 @@ func GetNTPPool(w http.ResponseWriter, r *http.Request) {
 	// 获取NTP服务器列表
 	ntpServers := GetNTPServers()
 
-	// 获取lastNTPSamples数据
-	lastSamples := GetLastNTPSamples()
+	// 获取firstNTPSamples数据
+	firstSamples := GetFirstNTPSamples()
 
 	// 转换为响应格式
 	var ntpServerResponse []TimeServiceANTPServer
 	for _, server := range ntpServers {
 		var samples []TimeServiceANTPSample
-		if serverSamples, exists := lastSamples[server.Address]; exists {
+		if serverSamples, exists := firstSamples[server.Address]; exists {
 			// 转换为API响应格式
 			for _, sample := range serverSamples {
 				samples = append(samples, TimeServiceANTPSample{

@@ -5,7 +5,6 @@ class TimeService {
     constructor() {
         this.generateTabContents();
         this.initTabs();
-        this.initEventListeners();
         this.loadInitialData();
     }
 
@@ -72,11 +71,6 @@ class TimeService {
                         <p class="text-sm text-gray-500">当前时间服务运行模式</p>
                     </div>
                 </div>
-                <div class="mt-6">
-                    <button id="refresh-time" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded">
-                        <i class="fa fa-refresh mr-2"></i>刷新时间
-                    </button>
-                </div>
             </div>
         </div>`;
     }
@@ -112,11 +106,6 @@ class TimeService {
                         </div>
                     </div>
                 </div>
-                <div class="mt-6">
-                    <button id="refresh-status" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded">
-                        <i class="fa fa-refresh mr-2"></i>刷新状态
-                    </button>
-                </div>
             </div>
         </div>`;
     }
@@ -148,11 +137,6 @@ class TimeService {
                         <p id="max-deviation" class="text-gray-600">加载中...</p>
                     </div>
                 </div>
-                <div class="mt-6">
-                    <button id="refresh-stats" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded">
-                        <i class="fa fa-refresh mr-2"></i>刷新统计
-                    </button>
-                </div>
             </div>
         </div>`;
     }
@@ -183,11 +167,6 @@ class TimeService {
                         <h3 class="text-lg font-medium text-gray-700 mb-2">最后失败时间</h3>
                         <p id="last-failure-time" class="text-gray-600">加载中...</p>
                     </div>
-                </div>
-                <div class="mt-6">
-                    <button id="refresh-cb" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded">
-                        <i class="fa fa-refresh mr-2"></i>刷新状态
-                    </button>
                 </div>
             </div>
         </div>`;
@@ -227,41 +206,6 @@ class TimeService {
                 this.loadTabData(tabId);
             });
         });
-    }
-
-    // 初始化事件监听器
-    initEventListeners() {
-        // 刷新时间按钮
-        const refreshTimeBtn = document.getElementById('refresh-time');
-        if (refreshTimeBtn) {
-            refreshTimeBtn.addEventListener('click', () => {
-                this.loadSyncTime();
-            });
-        }
-
-        // 刷新状态按钮
-        const refreshStatusBtn = document.getElementById('refresh-status');
-        if (refreshStatusBtn) {
-            refreshStatusBtn.addEventListener('click', () => {
-                this.loadStatus();
-            });
-        }
-
-        // 刷新统计按钮
-        const refreshStatsBtn = document.getElementById('refresh-stats');
-        if (refreshStatsBtn) {
-            refreshStatsBtn.addEventListener('click', () => {
-                this.loadStats();
-            });
-        }
-
-        // 刷新熔断器按钮
-        const refreshCbBtn = document.getElementById('refresh-cb');
-        if (refreshCbBtn) {
-            refreshCbBtn.addEventListener('click', () => {
-                this.loadCircuitBreakerState();
-            });
-        }
     }
 
     // 加载初始数据
