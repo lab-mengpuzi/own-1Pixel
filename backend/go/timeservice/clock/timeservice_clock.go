@@ -6,12 +6,11 @@ import (
 )
 
 var (
-	systemTimestampBase    int64 // 系统时间基准（用于单调时间反向映射）
 	monotonicTimestampBase int64 // 单调时间基准
 )
 
 func getSystemTimestamp() int64 {
-	return systemTimestampBase
+	return time.Now().UnixNano()
 }
 
 func GetMonotonicTimestamp() int64 {
@@ -28,7 +27,5 @@ func Format(now time.Time) string {
 
 func InitClock() {
 	fmt.Println("初始化时钟基准系统...")
-	time := time.Now().UnixNano()
-	systemTimestampBase = time
-	monotonicTimestampBase = time
+	monotonicTimestampBase = getSystemTimestamp()
 }
