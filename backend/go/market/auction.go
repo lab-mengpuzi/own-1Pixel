@@ -406,7 +406,7 @@ func CreateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if auction.InitialPrice <= 0 || auction.MinPrice <= 0 || auction.PriceDecrement <= 0 {
+	if auction.InitialPrice <= 0 || auction.MinPrice < 0 || auction.PriceDecrement <= 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
