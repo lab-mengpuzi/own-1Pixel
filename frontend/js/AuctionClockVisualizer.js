@@ -267,7 +267,7 @@ class AuctionClockVisualizer {
         this.currentAngle = (currentTick + direction) * tickStepAngle;
         
         // 添加机械感：轻微的回弹效果
-        this.addMechanicalBounce(direction);
+        // this.addMechanicalBounce(direction);
         
         // 更新价格
         this.updatePriceFromAngle();
@@ -276,19 +276,19 @@ class AuctionClockVisualizer {
     /**
      * 添加机械钟表的回弹效果
      */
-    addMechanicalBounce(direction) {
-        // 记录回弹前的角度
-        const preBounceAngle = this.currentAngle;
+    // addMechanicalBounce(direction) {
+    //     // 记录回弹前的角度
+    //     const preBounceAngle = this.currentAngle;
         
-        // 轻微回弹（模拟机械钟表的齿轮咬合感）
-        setTimeout(() => {
-            this.currentAngle = preBounceAngle + (direction * this.getTickStepAngle() * 0.1);
+    //     // 轻微回弹（模拟机械钟表的齿轮咬合感）
+    //     setTimeout(() => {
+    //         this.currentAngle = preBounceAngle + (direction * this.getTickStepAngle() * 0.1);
             
-            setTimeout(() => {
-                this.currentAngle = preBounceAngle;
-            }, 50);
-        }, 30);
-    }
+    //         setTimeout(() => {
+    //             this.currentAngle = preBounceAngle;
+    //         }, 50);
+    //     }, 30);
+    // }
     
     /**
      * 停止动画

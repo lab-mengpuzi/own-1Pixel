@@ -258,12 +258,19 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 		newPrice = auction.MinPrice
 	}
 
-	// 如果价格已经达到最低价格，则结束拍卖
+	// 如果价格已经达到最低价格，则取消拍卖并退还物品
 	if newPrice <= auction.MinPrice {
-		// 更新拍卖状态为已完成
-		_, err := tx.Exec("UPDATE auctions SET status = 'completed', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		// 更新拍卖状态为已取消
+		_, err := tx.Exec("UPDATE auctions SET status = 'cancelled', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 			newPrice, auction.ID)
 		if err != nil {
+			return err
+		}
+
+		// 退还物品至背包
+		err = UnlockBackpackItems(tx, auction.ItemType, auction.Quantity)
+		if err != nil {
+			logger.Info("auction_price_update_manager", fmt.Sprintf("退还物品至背包失败: %v\n", err))
 			return err
 		}
 
@@ -273,12 +280,12 @@ func (auctionWSPriceUpdateManager *AuctionPriceUpdateManager) updateAuctionPrice
 		// 创建更新后的拍卖对象，避免再次查询数据库
 		updatedAuction := auction
 		updatedAuction.CurrentPrice = newPrice
-		updatedAuction.Status = "completed"
+		updatedAuction.Status = "cancelled"
 
 		// 广播拍卖更新
-		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(&updatedAuction, "completed")
+		auctionWSPriceUpdateManager.auctionWSManager.BroadcastAuctionWSUpdate(&updatedAuction, "cancelled")
 
-		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 已达到最低价格，拍卖结束\n", auction.ID))
+		logger.Info("auction_price_update_manager", fmt.Sprintf("拍卖ID %d 已达到最低价格但无人竞价，拍卖已取消并退还物品\n", auction.ID))
 		return nil
 	}
 
