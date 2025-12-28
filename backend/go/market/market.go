@@ -63,8 +63,8 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 			balance_range REAL NOT NULL DEFAULT 1.0,
 			price_fluctuation REAL NOT NULL DEFAULT 1.0,
 			max_price_change REAL NOT NULL DEFAULT 1.0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME,
+			updated_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -78,8 +78,8 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			apple INTEGER NOT NULL DEFAULT 0,
 			wood INTEGER NOT NULL DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME,
+			updated_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -95,8 +95,8 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 			price REAL NOT NULL,
 			stock INTEGER NOT NULL DEFAULT 0,
 			base_price REAL NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME,
+			updated_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -113,8 +113,9 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 	}
 
 	if count == 0 {
-		_, err = dbConn.Exec("INSERT INTO market_params (balance_range, price_fluctuation, max_price_change) VALUES (?, ?, ?)",
-			marketConfig.DefaultBalance, marketConfig.DefaultFluctuation, marketConfig.DefaultMaxChange)
+		currentTime := timeservice.SyncNow()
+		_, err = dbConn.Exec("INSERT INTO market_params (balance_range, price_fluctuation, max_price_change, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			marketConfig.DefaultBalance, marketConfig.DefaultFluctuation, marketConfig.DefaultMaxChange, currentTime, currentTime)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("初始化市场参数记录失败: %v\n", err))
 			return err
@@ -129,7 +130,8 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 	}
 
 	if count == 0 {
-		_, err = dbConn.Exec("INSERT INTO backpack (apple, wood) VALUES (0, 0)")
+		currentTime := timeservice.SyncNow()
+		_, err = dbConn.Exec("INSERT INTO backpack (apple, wood, created_at, updated_at) VALUES (0, 0, ?, ?)", currentTime, currentTime)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("初始化背包记录失败: %v\n", err))
 			return err
@@ -148,8 +150,9 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 		var appleCount int
 		dbConn.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'apple'").Scan(&appleCount)
 		if appleCount == 0 {
-			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('apple', ?, 0, ?)",
-				marketConfig.InitialApplePrice, marketConfig.InitialApplePrice)
+			currentTime := timeservice.SyncNow()
+			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price, created_at, updated_at) VALUES ('apple', ?, 0, ?, ?, ?)",
+				marketConfig.InitialApplePrice, marketConfig.InitialApplePrice, currentTime, currentTime)
 			if err != nil {
 				logger.Info("market", fmt.Sprintf("初始化苹果物品记录失败: %v\n", err))
 				return err
@@ -160,8 +163,9 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 		var woodCount int
 		dbConn.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'wood'").Scan(&woodCount)
 		if woodCount == 0 {
-			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price) VALUES ('wood', ?, 0, ?)",
-				marketConfig.InitialWoodPrice, marketConfig.InitialWoodPrice)
+			currentTime := timeservice.SyncNow()
+			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price, created_at, updated_at) VALUES ('wood', ?, 0, ?, ?, ?)",
+				marketConfig.InitialWoodPrice, marketConfig.InitialWoodPrice, currentTime, currentTime)
 			if err != nil {
 				logger.Info("market", fmt.Sprintf("初始化木材物品记录失败: %v\n", err))
 				return err
@@ -199,8 +203,9 @@ func GetMarketParams(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 // 更新市场参数
 func UpdateMarketParams(db *sql.DB, params MarketParams) error {
-	_, err := db.Exec("UPDATE market_params SET balance_range = ?, price_fluctuation = ?, max_price_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		params.BalanceRange, params.PriceFluctuation, params.MaxPriceChange, params.ID)
+	currentTime := timeservice.SyncNow()
+	_, err := db.Exec("UPDATE market_params SET balance_range = ?, price_fluctuation = ?, max_price_change = ?, updated_at = ? WHERE id = ?",
+		params.BalanceRange, params.PriceFluctuation, params.MaxPriceChange, currentTime, params.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场参数失败: %v\n", err))
 		return err
@@ -297,8 +302,8 @@ func GetBackpack(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 // 更新背包
 func UpdateBackpack(db *sql.DB, backpack Backpack) error {
-	_, err := db.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		backpack.Apple, &backpack.Wood, backpack.ID)
+	_, err := db.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
+		backpack.Apple, &backpack.Wood, timeservice.SyncNow(), backpack.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		return err
@@ -353,8 +358,8 @@ func GetMarketItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 // 更新市场物品价格和库存
 func UpdateMarketItem(db *sql.DB, item MarketItem) error {
-	_, err := db.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		item.Price, item.Stock, item.ID)
+	_, err := db.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = ? WHERE id = ?",
+		item.Price, item.Stock, timeservice.SyncNow(), item.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场物品失败: %v\n", err))
 		return err
@@ -466,8 +471,9 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新背包
-	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		backpack.Apple, backpack.Wood, backpack.ID)
+	currentTime := timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
+		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
@@ -679,8 +685,9 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新背包
-	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		backpack.Apple, backpack.Wood, backpack.ID)
+	currentTime := timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
+		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
@@ -694,8 +701,9 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新市场物品
-	_, err = tx.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		item.Price, item.Stock, item.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = ? WHERE id = ?",
+		item.Price, item.Stock, currentTime, item.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场物品失败: %v\n", err))
 		tx.Rollback()
@@ -709,8 +717,9 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新余额
-	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		newBalance, balance.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = ? WHERE id = ?",
+		newBalance, currentTime, balance.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新余额失败: %v\n", err))
 		tx.Rollback()
@@ -960,9 +969,13 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		return
 	}
 
+	// 当前时间
+	var currentTime time.Time
+
 	// 更新背包
-	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		backpack.Apple, backpack.Wood, backpack.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
+		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新背包失败: %v\n", err))
 		tx.Rollback()
@@ -976,8 +989,9 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	}
 
 	// 更新市场物品
-	_, err = tx.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		item.Price, item.Stock, item.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE market_items SET price = ?, stock = ?, updated_at = ? WHERE id = ?",
+		item.Price, item.Stock, currentTime, item.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新市场物品失败: %v\n", err))
 		tx.Rollback()
@@ -991,8 +1005,9 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	}
 
 	// 更新余额
-	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		newBalance, balance.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = ? WHERE id = ?",
+		newBalance, currentTime, balance.ID)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("更新余额失败: %v\n", err))
 		tx.Rollback()

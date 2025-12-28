@@ -149,7 +149,7 @@ func InitDatabase(dbConn *sql.DB) error {
 			income_amount REAL DEFAULT 0,
 			balance REAL,
 			note TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -161,8 +161,8 @@ func InitDatabase(dbConn *sql.DB) error {
 	_, err = dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS balance (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			amount REAL NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			amount REAL DEFAULT 0,
+			updated_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -179,7 +179,7 @@ func InitDatabase(dbConn *sql.DB) error {
 	}
 
 	if count == 0 {
-		_, err = dbConn.Exec("INSERT INTO balance (amount) VALUES (0)")
+		_, err = dbConn.Exec("INSERT INTO balance (amount, updated_at) VALUES (?, ?)", 0, timeservice.SyncNow())
 		if err != nil {
 			logger.Info("cash", fmt.Sprintf("初始化余额记录失败: %v\n", err))
 			return err
@@ -253,7 +253,7 @@ func GetBalance(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 // 更新余额
 func UpdateBalance(db *sql.DB, amount float64) error {
-	_, err := db.Exec("UPDATE balance SET amount = ?, updated_at = CURRENT_TIMESTAMP", amount)
+	_, err := db.Exec("UPDATE balance SET amount = ?, updated_at = ?", amount, timeservice.SyncNow())
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("更新余额失败: %v\n", err))
 		return err
@@ -390,8 +390,8 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	// 插入交易记录，不保存balance字段到数据库
 	result, err := db.Exec(
-		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		t.TransactionTime, t.OurBankAccountName, t.CounterpartyAlias, t.OurBankName, t.CounterpartyBank, t.ExpenseAmount, t.IncomeAmount, t.Note,
+		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		t.TransactionTime, t.OurBankAccountName, t.CounterpartyAlias, t.OurBankName, t.CounterpartyBank, t.ExpenseAmount, t.IncomeAmount, t.Note, timeservice.SyncNow(),
 	)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("插入交易记录失败: %v\n", err))
