@@ -64,8 +64,8 @@ func InitAuctionDatabase(dbConn *sql.DB) error {
 			end_time DATETIME,
 			status TEXT NOT NULL DEFAULT 'pending',
 			winner_id INTEGER,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME,
+			updated_at DATETIME
 		)
 	`)
 	if err != nil {
@@ -82,7 +82,7 @@ func InitAuctionDatabase(dbConn *sql.DB) error {
 			price REAL NOT NULL,
 			quantity INTEGER NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_at DATETIME,
 			FOREIGN KEY (auction_id) REFERENCES auctions(id)
 		)
 	`)
@@ -205,6 +205,8 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 		return
 	}
 
+	var currentTime time.Time
+
 	// 计算从开始时间到现在经过了多少个递减间隔
 	elapsedTime := time.Since(*auction.StartTime)
 	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
@@ -230,8 +232,9 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 		}
 
 		// 更新拍卖状态为已取消
-		_, err = tx.Exec("UPDATE auctions SET status = 'cancelled', current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			newPrice, auction.ID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE auctions SET status = 'cancelled', current_price = ?, updated_at = ? WHERE id = ?",
+			newPrice, currentTime, auction.ID)
 		if err != nil {
 			logger.Info("auction", fmt.Sprintf("更新拍卖状态失败: %v\n", err))
 			tx.Rollback()
@@ -274,8 +277,8 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 	// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
 	// 添加价格变化方向检查，防止价格波动
 	if newPrice != auction.CurrentPrice && newPrice <= auction.CurrentPrice {
-		_, err := db.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			newPrice, auction.ID)
+		_, err := db.Exec("UPDATE auctions SET current_price = ?, updated_at = ? WHERE id = ?",
+			newPrice, currentTime, auction.ID)
 		if err != nil {
 			logger.Info("auction", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
 			return
@@ -298,6 +301,8 @@ func LockBackpackItems(tx *sql.Tx, itemType string, quantity int) error {
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 
+	var currentTime time.Time
+
 	err := tx.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
@@ -311,15 +316,17 @@ func LockBackpackItems(tx *sql.Tx, itemType string, quantity int) error {
 			return fmt.Errorf("背包中的苹果数量不足，需要 %d 个，当前 %d 个", quantity, backpack.Apple)
 		}
 		// 更新背包中的苹果数量
-		_, err = tx.Exec("UPDATE backpack SET apple = apple - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			quantity, backpack.ID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE backpack SET apple = apple - ?, updated_at = ? WHERE id = ?",
+			quantity, currentTime, backpack.ID)
 	case "wood":
 		if backpack.Wood < quantity {
 			return fmt.Errorf("背包中的木材数量不足，需要 %d 个，当前 %d 个", quantity, backpack.Wood)
 		}
 		// 更新背包中的木材数量
-		_, err = tx.Exec("UPDATE backpack SET wood = wood - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			quantity, backpack.ID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE backpack SET wood = wood - ?, updated_at = ? WHERE id = ?",
+			quantity, currentTime, backpack.ID)
 	default:
 		return fmt.Errorf("无效的物品类型: %s", itemType)
 	}
@@ -342,6 +349,8 @@ func UnlockBackpackItems(tx *sql.Tx, itemType string, quantity int) error {
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 
+	var currentTime time.Time
+
 	err := tx.QueryRow("SELECT id, apple, wood, created_at, updated_at FROM backpack ORDER BY id DESC LIMIT 1").Scan(
 		&backpack.ID, &backpack.Apple, &backpack.Wood, &backpack.CreatedAt, &backpack.UpdatedAt)
 	if err != nil {
@@ -351,11 +360,13 @@ func UnlockBackpackItems(tx *sql.Tx, itemType string, quantity int) error {
 	// 更新背包中的物品数量
 	switch itemType {
 	case "apple":
-		_, err = tx.Exec("UPDATE backpack SET apple = apple + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			quantity, backpack.ID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE backpack SET apple = apple + ?, updated_at = ? WHERE id = ?",
+			quantity, currentTime, backpack.ID)
 	case "wood":
-		_, err = tx.Exec("UPDATE backpack SET wood = wood + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			quantity, backpack.ID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE backpack SET wood = wood + ?, updated_at = ? WHERE id = ?",
+			quantity, currentTime, backpack.ID)
 	default:
 		return fmt.Errorf("无效的物品类型: %s", itemType)
 	}
@@ -472,13 +483,14 @@ func CreateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 插入拍卖记录
+	currentTime := timeservice.SyncNow()
 	result, err := tx.Exec(`
 		INSERT INTO auctions 
-		(item_type, initial_price, current_price, min_price, price_decrement, decrement_interval, quantity, start_time, end_time, status) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(item_type, initial_price, current_price, min_price, price_decrement, decrement_interval, quantity, start_time, end_time, status, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		auction.ItemType, auction.InitialPrice, auction.CurrentPrice, auction.MinPrice,
 		auction.PriceDecrement, auction.DecrementInterval, auction.Quantity,
-		nil, nil, auction.Status)
+		nil, nil, auction.Status, currentTime, currentTime)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("插入拍卖记录失败: %v\n", err))
 		tx.Rollback()
@@ -793,6 +805,8 @@ func GetAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "启动荷兰钟拍卖请求\n")
 
+	var currentTime time.Time
+
 	// 统一设置响应头
 	w.Header().Set("Content-Type", "application/json")
 
@@ -889,16 +903,17 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置开始时间和状态
-	now := timeservice.SyncNow()
-	startTimeValue := now
-	endTimeValue := now.Add(time.Duration(auction.DecrementInterval) * time.Second * time.Duration(int((auction.InitialPrice-auction.MinPrice)/auction.PriceDecrement)))
+	currentTime = timeservice.SyncNow()
+	startTimeValue := currentTime
+	endTimeValue := currentTime.Add(time.Duration(auction.DecrementInterval) * time.Second * time.Duration(int((auction.InitialPrice-auction.MinPrice)/auction.PriceDecrement)))
 
 	// 更新拍卖状态
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(`
 		UPDATE auctions 
-		SET status = 'active', start_time = ?, end_time = ?, current_price = ?, updated_at = CURRENT_TIMESTAMP 
+		SET status = 'active', start_time = ?, end_time = ?, current_price = ?, updated_at = ? 
 		WHERE id = ?`,
-		startTimeValue, endTimeValue, auction.InitialPrice, data.AuctionID)
+		startTimeValue, endTimeValue, auction.InitialPrice, currentTime, data.AuctionID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("启动荷兰钟拍卖，更新拍卖状态失败: %v\n", err))
 		tx.Rollback()
@@ -1007,6 +1022,8 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 // 提交荷兰钟竞价
 func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "提交荷兰钟竞价请求\n")
+
+	var currentTime time.Time
 
 	// 统一设置响应头
 	w.Header().Set("Content-Type", "application/json")
@@ -1117,7 +1134,8 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 检查拍卖是否已结束
 	if auction.EndTime != nil && timeservice.SyncNow().After(*auction.EndTime) {
 		// 更新拍卖状态为已完成
-		_, err = tx.Exec("UPDATE auctions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", bid.AuctionID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE auctions SET status = 'completed', updated_at = ? WHERE id = ?", currentTime, bid.AuctionID)
 		if err != nil {
 			logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，更新拍卖状态失败: %v\n", err))
 			tx.Rollback()
@@ -1184,11 +1202,12 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新拍卖状态为已完成
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(`
 		UPDATE auctions 
-		SET status = 'completed', winner_id = ?, updated_at = CURRENT_TIMESTAMP 
+		SET status = 'completed', winner_id = ?, updated_at = ? 
 		WHERE id = ?`,
-		1, bid.AuctionID)
+		1, currentTime, bid.AuctionID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，更新拍卖状态失败: %v\n", err))
 		tx.Rollback()
@@ -1224,8 +1243,9 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新背包
-	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		backpack.Apple, backpack.Wood, backpack.ID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
+		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，更新用户背包失败: %v\n", err))
 		tx.Rollback()
@@ -1271,9 +1291,10 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新余额
+	currentTime = timeservice.SyncNow()
 	newBalance := balance.Amount - totalPrice
-	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		newBalance, balance.ID)
+	_, err = tx.Exec("UPDATE balance SET amount = ?, updated_at = ? WHERE id = ?",
+		newBalance, currentTime, balance.ID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，更新余额失败: %v\n", err))
 		tx.Rollback()
@@ -1287,9 +1308,10 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	// 添加交易记录
 	// 隐私数据
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(
-		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.SyncNow(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType))
+		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		currentTime, "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", totalPrice, 0, fmt.Sprintf("荷兰钟拍卖买入%s", auction.ItemType), currentTime)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价，添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -1345,6 +1367,8 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 // 取消荷兰钟拍卖
 func CancelAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "取消荷兰钟拍卖请求\n")
+
+	var currentTime time.Time
 
 	// 统一设置响应头
 	w.Header().Set("Content-Type", "application/json")
@@ -1443,7 +1467,8 @@ func CancelAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新拍卖状态为已取消
-	_, err = tx.Exec("UPDATE auctions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", data.AuctionID)
+	currentTime = timeservice.SyncNow()
+	_, err = tx.Exec("UPDATE auctions SET status = 'cancelled', updated_at = ? WHERE id = ?", currentTime, data.AuctionID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("取消荷兰钟拍卖，更新拍卖状态失败: %v\n", err))
 		tx.Rollback()
@@ -1600,6 +1625,8 @@ func GetSellerAuctions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 func PauseAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "暂停荷兰钟拍卖请求\n")
 
+	var currentTime time.Time
+
 	// 统一设置响应头
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1707,7 +1734,8 @@ func PauseAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 更新拍卖状态为待开始
-		_, err = tx.Exec("UPDATE auctions SET status = 'pending', start_time = NULL, end_time = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", data.AuctionID)
+		currentTime = timeservice.SyncNow()
+		_, err = tx.Exec("UPDATE auctions SET status = 'pending', start_time = NULL, end_time = NULL, updated_at = ? WHERE id = ?", currentTime, data.AuctionID)
 		if err != nil {
 			tx.Rollback()
 			logger.Info("auction", fmt.Sprintf("暂停荷兰钟拍卖，更新拍卖状态失败: %v\n", err))
@@ -1753,6 +1781,8 @@ func PauseAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 func UpdateAuctionPrices(db *sql.DB) {
 	logger.Info("auction", "开始更新荷兰钟拍卖价格\n")
 
+	var currentTime time.Time
+
 	// 获取所有活跃的拍卖
 	rows, err := db.Query(`
 		SELECT id, item_type, initial_price, current_price, min_price, price_decrement, 
@@ -1765,7 +1795,7 @@ func UpdateAuctionPrices(db *sql.DB) {
 	}
 	defer rows.Close()
 
-	now := timeservice.SyncNow()
+	currentTime = timeservice.SyncNow()
 	updatedCount := 0
 
 	for rows.Next() {
@@ -1791,9 +1821,10 @@ func UpdateAuctionPrices(db *sql.DB) {
 		}
 
 		// 检查拍卖是否已结束
-		if auction.EndTime != nil && now.After(*auction.EndTime) {
+		if auction.EndTime != nil && currentTime.After(*auction.EndTime) {
 			// 更新拍卖状态为已完成
-			_, err = db.Exec("UPDATE auctions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", auction.ID)
+			currentTime = timeservice.SyncNow()
+			_, err = db.Exec("UPDATE auctions SET status = 'completed', updated_at = ? WHERE id = ?", currentTime, auction.ID)
 			if err != nil {
 				logger.Info("auction", fmt.Sprintf("更新荷兰钟拍卖价格，更新拍卖状态为已完成失败: %v\n", err))
 				fmt.Printf("更新拍卖状态为已完成失败: %v\n", err)
@@ -1808,7 +1839,7 @@ func UpdateAuctionPrices(db *sql.DB) {
 		if auction.StartTime == nil {
 			continue
 		}
-		elapsed := now.Sub(*auction.StartTime)
+		elapsed := currentTime.Sub(*auction.StartTime)
 		intervals := int(elapsed.Seconds()) / auction.DecrementInterval
 		newPrice := auction.InitialPrice - float64(intervals)*auction.PriceDecrement
 
@@ -1820,7 +1851,8 @@ func UpdateAuctionPrices(db *sql.DB) {
 		// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
 		// 添加价格变化方向检查，防止价格波动
 		if newPrice != auction.CurrentPrice && newPrice <= auction.CurrentPrice {
-			_, err = db.Exec("UPDATE auctions SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", newPrice, auction.ID)
+			currentTime = timeservice.SyncNow()
+			_, err = db.Exec("UPDATE auctions SET current_price = ?, updated_at = ? WHERE id = ?", newPrice, currentTime, auction.ID)
 			if err != nil {
 				logger.Info("auction", fmt.Sprintf("更新荷兰钟拍卖价格，更新拍卖价格失败: %v\n", err))
 				fmt.Printf("更新拍卖价格失败: %v\n", err)
@@ -1911,6 +1943,8 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 		return false, "事务开始失败", err
 	}
 
+	var currentTime time.Time
+
 	// 检查拍卖是否存在且处于活跃状态
 	var auction Auction
 	var startTime, endTime sql.NullTime
@@ -1946,11 +1980,11 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 	}
 
 	// 记录竞价
-	now := timeservice.SyncNow()
+	currentTime = timeservice.SyncNow()
 	result, err := tx.Exec(`
 		INSERT INTO auction_bids (auction_id, user_id, price, quantity, status, created_at) 
 		VALUES (?, ?, ?, ?, 'accepted', ?)`,
-		auctionID, userID, price, quantity, now)
+		auctionID, userID, price, quantity, currentTime)
 	if err != nil {
 		tx.Rollback()
 		return false, "记录竞价失败", err
@@ -1963,10 +1997,11 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 	}
 
 	// 更新拍卖状态为已完成，设置中标者
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(`
 		UPDATE auctions 
-		SET status = 'completed', winner_id = ?, end_time = ?, updated_at = CURRENT_TIMESTAMP 
-		WHERE id = ?`, userID, now, auctionID)
+		SET status = 'completed', winner_id = ?, end_time = ?, updated_at = ? 
+		WHERE id = ?`, userID, currentTime, currentTime, auctionID)
 	if err != nil {
 		tx.Rollback()
 		return false, "更新拍卖状态失败", err
@@ -1987,6 +2022,8 @@ func ProcessAuctionBid(db *sql.DB, auctionID, userID int, price float64, quantit
 // 重新激活拍卖 - 允许卖家将已完成、已取消的拍卖状态更新为pending
 func ReactivateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "重新激活拍卖请求\n")
+
+	var currentTime time.Time
 
 	// 统一设置响应头
 	w.Header().Set("Content-Type", "application/json")
@@ -2097,10 +2134,11 @@ func ReactivateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 重置拍卖状态为pending，并重置当前价格为初始价格
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(`
 		UPDATE auctions 
-		SET status = 'pending', current_price = initial_price, start_time = NULL, end_time = NULL, winner_id = NULL, updated_at = CURRENT_TIMESTAMP 
-		WHERE id = ?`, data.AuctionID)
+		SET status = 'pending', current_price = initial_price, start_time = NULL, end_time = NULL, winner_id = NULL, updated_at = ? 
+		WHERE id = ?`, currentTime, data.AuctionID)
 	if err != nil {
 		logger.Info("auction", fmt.Sprintf("重新激活拍卖，更新拍卖状态失败: %v\n", err))
 		tx.Rollback()

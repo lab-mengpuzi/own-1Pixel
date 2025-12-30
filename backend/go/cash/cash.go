@@ -328,6 +328,8 @@ func GetTransactions(db *sql.DB, w http.ResponseWriter, _ *http.Request) {
 func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	var currentTime time.Time
+
 	if r.Method != "POST" {
 		logger.Info("cash", fmt.Sprintf("添加交易记录请求失败，不支持的请求方法: %s\n", r.Method))
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -389,9 +391,10 @@ func AddTransaction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	t.Balance = &newBalance
 
 	// 插入交易记录，不保存balance字段到数据库
+	currentTime = timeservice.SyncNow()
 	result, err := db.Exec(
 		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		t.TransactionTime, t.OurBankAccountName, t.CounterpartyAlias, t.OurBankName, t.CounterpartyBank, t.ExpenseAmount, t.IncomeAmount, t.Note, timeservice.SyncNow(),
+		t.TransactionTime, t.OurBankAccountName, t.CounterpartyAlias, t.OurBankName, t.CounterpartyBank, t.ExpenseAmount, t.IncomeAmount, t.Note, currentTime,
 	)
 	if err != nil {
 		logger.Info("cash", fmt.Sprintf("插入交易记录失败: %v\n", err))

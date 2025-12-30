@@ -56,6 +56,8 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 
 	logger.Info("market", "初始化市场数据库\n")
 
+	var currentTime time.Time
+
 	// 创建市场参数表
 	_, err := dbConn.Exec(`
 		CREATE TABLE IF NOT EXISTS market_params (
@@ -113,7 +115,7 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 	}
 
 	if count == 0 {
-		currentTime := timeservice.SyncNow()
+		currentTime = timeservice.SyncNow()
 		_, err = dbConn.Exec("INSERT INTO market_params (balance_range, price_fluctuation, max_price_change, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 			marketConfig.DefaultBalance, marketConfig.DefaultFluctuation, marketConfig.DefaultMaxChange, currentTime, currentTime)
 		if err != nil {
@@ -130,7 +132,7 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 	}
 
 	if count == 0 {
-		currentTime := timeservice.SyncNow()
+		currentTime = timeservice.SyncNow()
 		_, err = dbConn.Exec("INSERT INTO backpack (apple, wood, created_at, updated_at) VALUES (0, 0, ?, ?)", currentTime, currentTime)
 		if err != nil {
 			logger.Info("market", fmt.Sprintf("初始化背包记录失败: %v\n", err))
@@ -150,7 +152,7 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 		var appleCount int
 		dbConn.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'apple'").Scan(&appleCount)
 		if appleCount == 0 {
-			currentTime := timeservice.SyncNow()
+			currentTime = timeservice.SyncNow()
 			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price, created_at, updated_at) VALUES ('apple', ?, 0, ?, ?, ?)",
 				marketConfig.InitialApplePrice, marketConfig.InitialApplePrice, currentTime, currentTime)
 			if err != nil {
@@ -163,7 +165,7 @@ func InitMarketDatabase(dbConn *sql.DB) error {
 		var woodCount int
 		dbConn.QueryRow("SELECT COUNT(*) FROM market_items WHERE name = 'wood'").Scan(&woodCount)
 		if woodCount == 0 {
-			currentTime := timeservice.SyncNow()
+			currentTime = timeservice.SyncNow()
 			_, err = dbConn.Exec("INSERT INTO market_items (name, price, stock, base_price, created_at, updated_at) VALUES ('wood', ?, 0, ?, ?, ?)",
 				marketConfig.InitialWoodPrice, marketConfig.InitialWoodPrice, currentTime, currentTime)
 			if err != nil {
@@ -414,6 +416,8 @@ func CalculateNewPrice(currentPrice float64, stock int, params MarketParams, bas
 func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
 	w.Header().Set("Content-Type", "application/json")
 
+	var currentTime time.Time
+
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("制作物品请求失败，不支持的请求方法: %s\n", r.Method))
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -471,7 +475,7 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新背包
-	currentTime := timeservice.SyncNow()
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
 		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
@@ -496,9 +500,10 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 隐私数据
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(
-		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.SyncNow(), "玩家", "系统", "玩家银行", "系统银行", 0, 0, note)
+		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		currentTime, "玩家", "系统", "玩家银行", "系统银行", 0, 0, note, currentTime)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -536,6 +541,8 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 // 卖出物品
 func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
 	w.Header().Set("Content-Type", "application/json")
+
+	var currentTime time.Time
 
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("卖出物品请求失败，不支持的请求方法: %s\n", r.Method))
@@ -685,7 +692,7 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 更新背包
-	currentTime := timeservice.SyncNow()
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
 		backpack.Apple, backpack.Wood, currentTime, backpack.ID)
 	if err != nil {
@@ -734,9 +741,10 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 
 	// 添加交易记录
 	// 隐私数据
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(
-		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.SyncNow(), "萌铺子市场", "玩家", "萌铺子市场银行", "玩家银行", 0, item.Price, fmt.Sprintf("卖出%s", itemType))
+		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		currentTime, "萌铺子市场", "玩家", "萌铺子市场银行", "玩家银行", 0, item.Price, fmt.Sprintf("卖出%s", itemType), currentTime)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
@@ -809,6 +817,8 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 // 买入物品
 func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
 	w.Header().Set("Content-Type", "application/json")
+
+	var currentTime time.Time
 
 	if r.Method != "POST" {
 		logger.Info("market", fmt.Sprintf("买入物品请求失败，不支持的请求方法: %s\n", r.Method))
@@ -969,9 +979,6 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		return
 	}
 
-	// 当前时间
-	var currentTime time.Time
-
 	// 更新背包
 	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec("UPDATE backpack SET apple = ?, wood = ?, updated_at = ? WHERE id = ?",
@@ -1022,9 +1029,10 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 
 	// 添加交易记录
 	// 隐私数据
+	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(
-		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		timeservice.SyncNow(), "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", item.Price, 0, fmt.Sprintf("买入%s", itemType))
+		"INSERT INTO transactions (transaction_time, our_bank_account_name, counterparty_alias, our_bank_name, counterparty_bank, expense_amount, income_amount, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		currentTime, "玩家", "萌铺子市场", "玩家银行", "萌铺子市场银行", item.Price, 0, fmt.Sprintf("买入%s", itemType), currentTime)
 	if err != nil {
 		logger.Info("market", fmt.Sprintf("添加交易记录失败: %v\n", err))
 		tx.Rollback()
