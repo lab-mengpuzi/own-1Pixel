@@ -382,6 +382,8 @@ func UnlockBackpackItems(tx *sql.Tx, itemType string, quantity int) error {
 func CreateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	logger.Info("auction", "创建荷兰钟拍卖请求\n")
 
+	var currentTime time.Time
+
 	// 设置响应头为JSON格式
 	w.Header().Set("Content-Type", "application/json")
 
@@ -483,7 +485,7 @@ func CreateAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 插入拍卖记录
-	currentTime := timeservice.SyncNow()
+	currentTime = timeservice.SyncNow()
 	result, err := tx.Exec(`
 		INSERT INTO auctions 
 		(item_type, initial_price, current_price, min_price, price_decrement, decrement_interval, quantity, start_time, end_time, status, created_at, updated_at) 
