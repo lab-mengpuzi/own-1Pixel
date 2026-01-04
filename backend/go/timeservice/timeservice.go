@@ -22,7 +22,7 @@ var (
 	circuitBreaker              TimeServiceCircuitBreakerState    // 熔断器状态
 	ntpSamples                  map[string][]TimeServiceNTPSample // 获取第一个NTP样本数据，按服务器地址存储
 	ntpSamplesMutex             sync.RWMutex                      // 保护ntpSamples的读写锁
-	syncTimestampOffset         int64                             // 同步时间偏移量（syncTimestampOffset = syncTimestamp - processStartSystemTimestamp
+	syncTimestampOffset         int64                             // 同步时间偏移量（syncTimestampOffset = syncTimestamp - processStartSystemTimestamp）
 	stats                       TimeServiceStats                  // 统计信息
 )
 
