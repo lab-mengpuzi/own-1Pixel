@@ -2,4 +2,5 @@
 *.db-*
 *.json
 *.log
-own-1Pixel*
+*1Pixel*.exe
+.claude

@@ -382,7 +382,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSUpdate(auction *Auct
 			failedConnections = append(failedConnections, conn)
 		} else {
 			successCount++
-			logger.Info("websocket", fmt.Sprintf("广播拍卖更新成功, 发送耗时: %s\n", FormatDuration(sendDuration)))
+			logger.Info("websocket", fmt.Sprintf("广播拍卖更新成功, 当前价格: %.2f, 发送耗时: %s\n", auction.CurrentPrice, FormatDuration(sendDuration)))
 		}
 	}
 
@@ -454,7 +454,7 @@ func (auctionWSManager *AuctionWSManager) BroadcastAuctionWSPriceUpdate(auctionI
 			failedConnections = append(failedConnections, conn)
 		} else {
 			successCount++
-			logger.Info("websocket", fmt.Sprintf("广播价格更新成功, 发送耗时: %s\n", FormatDuration(sendDuration)))
+			logger.Info("websocket", fmt.Sprintf("广播价格更新成功, 旧价格: %.2f, 新价格: %.2f, 发送耗时: %s\n", oldPrice, newPrice, FormatDuration(sendDuration)))
 		}
 	}
 

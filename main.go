@@ -21,10 +21,9 @@ import (
 )
 
 //go:embed frontend/*
-var frontendFS embed.FS                                         // 静态资源二进制化
-var dbConn *sql.DB                                              // 数据库对象
-var auctionWSManager *market.AuctionWSManager                   // 拍卖WebSocket管理器
-var auctionPriceUpdateManager *market.AuctionPriceUpdateManager // 价格更新管理器
+var frontendFS embed.FS                       // 静态资源二进制化
+var dbConn *sql.DB                            // 数据库对象
+var auctionWSManager *market.AuctionWSManager // 拍卖WebSocket管理器
 
 // 初始化数据库
 func initDatabase() error {
@@ -167,11 +166,6 @@ func startAuction(w http.ResponseWriter, r *http.Request) {
 		auction, err := market.GetAuctionID(dbConn, auctionID)
 		if err == nil {
 			auctionWSManager.BroadcastAuctionWSUpdate(auction, "started")
-
-			// 启动价格更新管理器
-			if auctionPriceUpdateManager != nil && !auctionPriceUpdateManager.IsRunning() {
-				auctionPriceUpdateManager.StartAuctionWSPriceUpdateManager()
-			}
 		}
 	}
 }
@@ -326,9 +320,7 @@ func main() {
 
 	// 初始化WebSocket管理器
 	auctionWSManager = market.InitAuctionWSManager(dbConn)
-
-	// 初始化价格更新管理器
-	auctionPriceUpdateManager = market.InitAuctionWSPriceUpdateManager(dbConn, auctionWSManager)
+	market.SetGlobalAuctionWSManager(auctionWSManager)
 
 	// 处理静态资源二进制化
 	staticFS, err := fs.Sub(frontendFS, "frontend")
@@ -386,7 +378,7 @@ func main() {
 	http.HandleFunc("/api/auction/pause", pauseAuction)
 	http.HandleFunc("/api/auction/reactivate", reactivateAuction)
 
-	// WebSocket端点
+	// 荷兰钟拍卖WebSocket端点
 	http.HandleFunc("/ws/auction", auctionWSManager.HandleAuctionWebSocket)
 
 	// 时间服务系统API端点

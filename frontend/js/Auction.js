@@ -89,8 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 获取当前显示的价格，用于本地验证
         const buyerPriceElement = document.querySelector(`#auctionsList [data-auction-id="${auctionId}"] .price-countdown`);
-        const sellerPriceElement = document.querySelector(`#sellerAuctionsList [data-auction-id="${auctionId}"] .price-countdown`);
-        const currentDisplayPrice = buyerPriceElement ? parseFloat(buyerPriceElement.textContent.replace(/[^\d.]/g, '')) : 
+        const sellerPriceElement = document.querySelector(`#sellerAuctionsList #seller-auction-${auctionId} .price-countdown`);
+        const currentDisplayPrice = buyerPriceElement ? parseFloat(buyerPriceElement.textContent.replace(/[^\d.]/g, '')) :
                                     (sellerPriceElement ? parseFloat(sellerPriceElement.textContent.replace(/[^\d.]/g, '')) : null);
 
         // 本地价格验证：检查价格变化方向是否正确（荷兰钟拍卖价格应该只递减）
