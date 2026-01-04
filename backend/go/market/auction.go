@@ -12,13 +12,6 @@ import (
 	"own-1Pixel/backend/go/timeservice"
 )
 
-// 拍卖定时器项
-type AuctionTimerItem struct {
-	Timer     *time.Timer
-	AuctionID int
-	Interval  int // 递减间隔(秒)
-}
-
 // 全局变量，用于存储每个拍卖的定时器
 var auctionTimers = make(map[int]*AuctionTimerItem) // key: auctionID
 var timersMutex sync.Mutex
@@ -29,6 +22,13 @@ var GlobalAuctionWSManager *AuctionWSManager
 // SetGlobalAuctionWSManager 设置全局WebSocket管理器
 func SetGlobalAuctionWSManager(wsManager *AuctionWSManager) {
 	GlobalAuctionWSManager = wsManager
+}
+
+// 拍卖定时器项
+type AuctionTimerItem struct {
+	Timer     *time.Timer
+	AuctionID int
+	Interval  int // 递减间隔(秒)
 }
 
 // 荷兰钟拍卖结构
