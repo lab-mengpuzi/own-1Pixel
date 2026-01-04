@@ -15,7 +15,6 @@ type Config struct {
 	Logger           LoggerConfig           `json:"logger"`           // 日志系统配置
 	Cash             CashConfig             `json:"cash"`             // 现金系统配置
 	Market           MarketConfig           `json:"market"`           // 市场系统配置
-	Auction          AuctionConfig          `json:"auction"`          // 拍卖系统配置
 	AuctionWebSocket AuctionWebSocketConfig `json:"auctionWebSocket"` // 拍卖系统WebSocket配置
 	TimeService      TimeServiceConfig      `json:"timeService"`      // 时间服务配置
 }
@@ -43,12 +42,6 @@ type MarketConfig struct {
 	DefaultBalance     float64 `json:"defaultBalance"`     // 默认平衡系数
 	DefaultFluctuation float64 `json:"defaultFluctuation"` // 默认波动系数
 	DefaultMaxChange   float64 `json:"defaultMaxChange"`   // 默认最大变动系数
-}
-
-// AuctionConfig 拍卖系统配置
-type AuctionConfig struct {
-	DefaultDecrementInterval int     `json:"defaultDecrementInterval"` // 默认价格递减间隔（秒）
-	DefaultPriceDecrement    float64 `json:"defaultPriceDecrement"`    // 默认价格递减量
 }
 
 // AuctionWebSocketConfig 拍卖系统WebSocket配置
@@ -99,10 +92,6 @@ var config = Config{
 		DefaultFluctuation: 1.0, // 默认波动系数
 		DefaultMaxChange:   1.0, // 默认最大变动系数
 	},
-	Auction: AuctionConfig{
-		DefaultDecrementInterval: 10,  // 默认价格递减间隔（秒）
-		DefaultPriceDecrement:    0.1, // 默认价格递减量
-	},
 	AuctionWebSocket: AuctionWebSocketConfig{
 		ReadLimit:    512,              // 读取消息大小限制
 		ReadTimeout:  45 * time.Second, // 读取超时时间
@@ -116,11 +105,11 @@ var config = Config{
 		SyncInterval:     1 * time.Hour,          // 同步间隔
 		RecoveryTimeout:  60 * time.Second,       // 恢复超时
 		NTPServers: []TimeServiceNTPServer{ // 使用默认NTP服务器列表初始化
-			{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 1.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "东北大学", Address: "ntp.neu.edu.cn", Weight: 2.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "大连东软信息学院", Address: "ntp.neusoft.edu.cn", Weight: 3.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 4.0, IsDomestic: true, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
-			{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 5.0, IsDomestic: false, MaxDeviation: 20 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "国家授时中心", Address: "ntp.ntsc.ac.cn", Weight: 1.0, IsDomestic: true, MaxDeviation: 5 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "东北大学", Address: "ntp.neu.edu.cn", Weight: 2.0, IsDomestic: true, MaxDeviation: 5 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "大连东软信息学院", Address: "ntp.neusoft.edu.cn", Weight: 3.0, IsDomestic: true, MaxDeviation: 5 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "阿里云", Address: "ntp.aliyun.com", Weight: 4.0, IsDomestic: true, MaxDeviation: 5 * time.Second.Nanoseconds(), IsSelected: false},
+			{Name: "海外备用源（微软）", Address: "time.windows.com", Weight: 5.0, IsDomestic: false, MaxDeviation: 5 * time.Second.Nanoseconds(), IsSelected: false},
 		},
 	},
 }

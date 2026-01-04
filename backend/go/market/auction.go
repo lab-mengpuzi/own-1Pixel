@@ -5,16 +5,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
-	"own-1Pixel/backend/go/config"
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/timeservice"
 )
 
-// 全局变量，用于存储价格递减定时器
-var auctionPriceDecrementTimer *time.Timer
-var isTimerRunning = false
+// 拍卖定时器项
+type AuctionTimerItem struct {
+	Timer     *time.Timer
+	AuctionID int
+	Interval  int // 递减间隔(秒)
+}
+
+// 全局变量，用于存储每个拍卖的定时器
+var auctionTimers = make(map[int]*AuctionTimerItem) // key: auctionID
+var timersMutex sync.Mutex
+
+// 全局WebSocket管理器引用
+var GlobalAuctionWSManager *AuctionWSManager
+
+// SetGlobalAuctionWSManager 设置全局WebSocket管理器
+func SetGlobalAuctionWSManager(wsManager *AuctionWSManager) {
+	GlobalAuctionWSManager = wsManager
+}
 
 // 荷兰钟拍卖结构
 type Auction struct {
@@ -99,37 +114,107 @@ func InitAuctionDatabase(dbConn *sql.DB) error {
 	return nil
 }
 
-// 启动价格递减定时器
-func StartAuctionPriceDecrementTimer(db *sql.DB) {
-	if isTimerRunning {
+// 启动单个拍卖的价格递减定时器
+func StartAuctionPriceDecrementTimer(db *sql.DB, auctionID int) {
+	timersMutex.Lock()
+
+	// 检查是否已经存在定时器
+	if _, exists := auctionTimers[auctionID]; exists {
+		timersMutex.Unlock()
+		logger.Info("auction", fmt.Sprintf("拍卖ID %d 的定时器已存在\n", auctionID))
 		return
 	}
 
-	isTimerRunning = true
+	// 获取拍卖的递减间隔
+	var decrementInterval int
+	err := db.QueryRow("SELECT decrement_interval FROM auctions WHERE id = ?", auctionID).Scan(&decrementInterval)
+	if err != nil {
+		timersMutex.Unlock()
+		logger.Info("auction", fmt.Sprintf("获取拍卖ID %d 的递减间隔失败: %v\n", auctionID, err))
+		return
+	}
 
-	// 立即执行一次价格更新
-	updateActiveAuctionPrices(db)
+	// 创建定时器,等待第一个间隔后再执行更新
+	timer := time.AfterFunc(time.Duration(decrementInterval)*time.Second, func() {
+		// 执行价格更新
+		updateSingleAuctionPrice(db, auctionID)
 
-	// 获取全局配置实例
-	_config := config.GetConfig()
-	auctionConfig := _config.Auction
+		// 检查拍卖是否还是活跃状态
+		timersMutex.Lock()
+		var status string
+		checkErr := db.QueryRow("SELECT status FROM auctions WHERE id = ?", auctionID).Scan(&status)
+		if checkErr == nil && status == "active" {
+			// 从map中删除旧的定时器引用
+			delete(auctionTimers, auctionID)
+			timersMutex.Unlock()
 
-	// 设置定时器，使用配置中的默认间隔
-	auctionPriceDecrementTimer = time.AfterFunc(time.Duration(auctionConfig.DefaultDecrementInterval)*time.Second, func() {
-		updateActiveAuctionPrices(db)
-		// 递归调用，保持定时器运行
-		if isTimerRunning {
-			StartAuctionPriceDecrementTimer(db)
+			// 递归调用,启动新的定时器
+			StartAuctionPriceDecrementTimer(db, auctionID)
+		} else {
+			// 拍卖已结束或出错,清理定时器
+			delete(auctionTimers, auctionID)
+			timersMutex.Unlock()
+			logger.Info("auction", fmt.Sprintf("拍卖ID %d 已结束,清理定时器\n", auctionID))
 		}
 	})
+
+	// 保存定时器
+	auctionTimers[auctionID] = &AuctionTimerItem{
+		Timer:     timer,
+		AuctionID: auctionID,
+		Interval:  decrementInterval,
+	}
+	timersMutex.Unlock()
+
+	logger.Info("auction", fmt.Sprintf("为拍卖ID %d 启动定时器,递减间隔: %d 秒\n", auctionID, decrementInterval))
 }
 
-// 停止价格递减定时器
-func StopAuctionPriceDecrementTimer() {
-	if auctionPriceDecrementTimer != nil {
-		auctionPriceDecrementTimer.Stop()
+// 停止单个拍卖的价格递减定时器
+func StopAuctionPriceDecrementTimerByID(auctionID int) {
+	timersMutex.Lock()
+	defer timersMutex.Unlock()
+
+	if timerItem, exists := auctionTimers[auctionID]; exists {
+		if timerItem.Timer != nil {
+			timerItem.Timer.Stop()
+		}
+		delete(auctionTimers, auctionID)
+		logger.Info("auction", fmt.Sprintf("停止拍卖ID %d 的定时器\n", auctionID))
 	}
-	isTimerRunning = false
+}
+
+// 更新单个拍卖的价格
+func updateSingleAuctionPrice(db *sql.DB, auctionID int) {
+	// 查询拍卖信息
+	var auction Auction
+	var startTime, endTime sql.NullTime
+
+	err := db.QueryRow(`
+		SELECT id, item_type, initial_price, current_price, min_price, price_decrement,
+		decrement_interval, quantity, start_time, end_time, status, winner_id, created_at, updated_at
+		FROM auctions WHERE id = ?`, auctionID).Scan(
+		&auction.ID, &auction.ItemType, &auction.InitialPrice, &auction.CurrentPrice,
+		&auction.MinPrice, &auction.PriceDecrement, &auction.DecrementInterval,
+		&auction.Quantity, &startTime, &endTime, &auction.Status,
+		&auction.WinnerID, &auction.CreatedAt, &auction.UpdatedAt)
+
+	if err != nil {
+		logger.Info("auction", fmt.Sprintf("查询拍卖ID %d 失败: %v\n", auctionID, err))
+		// 停止定时器
+		StopAuctionPriceDecrementTimerByID(auctionID)
+		return
+	}
+
+	// 处理可能为NULL的时间字段
+	if startTime.Valid {
+		auction.StartTime = &startTime.Time
+	}
+	if endTime.Valid {
+		auction.EndTime = &endTime.Time
+	}
+
+	// 调用通用的价格更新函数
+	updateAuctionPrice(db, auction)
 }
 
 // 恢复进行中的拍卖
@@ -150,9 +235,13 @@ func recoverActiveAuctions(db *sql.DB) {
 
 	logger.Info("auction", fmt.Sprintf("发现 %d 个进行中的拍卖，开始恢复...\n", len(activeAuctions)))
 
-	// 启动价格递减定时器
-	StartAuctionPriceDecrementTimer(db)
-	logger.Info("auction", "价格递减定时器已启动，将自动更新活跃拍卖价格\n")
+	// 为每个活跃拍卖启动独立的价格递减定时器
+	for _, auction := range activeAuctions {
+		if auction.Status == "active" {
+			StartAuctionPriceDecrementTimer(db, auction.ID)
+		}
+	}
+	logger.Info("auction", "所有活跃拍卖的价格递减定时器已启动\n")
 }
 
 // 更新活跃拍卖的价格
@@ -208,8 +297,14 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 	var currentTime time.Time
 
 	// 计算从开始时间到现在经过了多少个递减间隔
-	elapsedTime := time.Since(*auction.StartTime)
-	intervalsPassed := int(elapsedTime.Seconds()) / auction.DecrementInterval
+	duration := time.Since(*auction.StartTime)
+	intervalsPassed := int(duration.Seconds()) / auction.DecrementInterval
+
+	// 添加详细调试日志
+	currentTime = timeservice.SyncNow()
+	now := time.Now() // 使用系统时间,而不是 timeservice.SyncNow()
+	logger.Info("auction", fmt.Sprintf("拍卖ID %d 时间详情: currentTime=%v, now=%v, startTime=%v, duration=%.2fs, intervalsPassed=%d, priceDecrement=%.2f, currentPrice=%.2f\n",
+		auction.ID, currentTime.Format("15:04:05.000"), now.Format("15:04:05.000"), auction.StartTime.Format("15:04:05.000"), duration.Seconds(), intervalsPassed, auction.PriceDecrement, auction.CurrentPrice))
 
 	// 使用拍卖自身配置的价格递减量，而不是硬编码的1.0
 	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
@@ -258,18 +353,8 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 
 		logger.Info("auction", fmt.Sprintf("拍卖ID %d 已达到最低价格但无人竞价，拍卖已取消并退还物品\n", auction.ID))
 
-		// 检查是否还有其他活跃的拍卖，如果没有则停止定时器
-		var activeAuctionCount int
-		err = db.QueryRow("SELECT COUNT(*) FROM auctions WHERE status = 'active'").Scan(&activeAuctionCount)
-		if err != nil {
-			logger.Info("auction", fmt.Sprintf("检查活跃拍卖数量失败: %v\n", err))
-			return
-		}
-
-		if activeAuctionCount == 0 {
-			StopAuctionPriceDecrementTimer()
-			logger.Info("auction", "没有活跃的拍卖，停止价格递减定时器\n")
-		}
+		// 停止该拍卖的定时器
+		StopAuctionPriceDecrementTimerByID(auction.ID)
 
 		return
 	}
@@ -277,13 +362,28 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 	// 只有当价格有变化且变化方向正确（递减）时，才更新数据库
 	// 添加价格变化方向检查，防止价格波动
 	if newPrice != auction.CurrentPrice && newPrice <= auction.CurrentPrice {
+		oldPrice := auction.CurrentPrice
+		currentTime = timeservice.SyncNow()
 		_, err := db.Exec("UPDATE auctions SET current_price = ?, updated_at = ? WHERE id = ?",
 			newPrice, currentTime, auction.ID)
 		if err != nil {
 			logger.Info("auction", fmt.Sprintf("更新拍卖价格失败: %v\n", err))
 			return
 		}
-		logger.Info("auction", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, auction.CurrentPrice, newPrice))
+		logger.Info("auction", fmt.Sprintf("拍卖ID %d 价格已更新: %.2f -> %.2f\n", auction.ID, oldPrice, newPrice))
+
+		// 计算剩余时间
+		remainingDecrementSteps := int((newPrice-auction.MinPrice)/auction.PriceDecrement) + 1
+		timeRemaining := remainingDecrementSteps * auction.DecrementInterval
+
+		// 通过WebSocket广播价格更新
+		if GlobalAuctionWSManager != nil {
+			GlobalAuctionWSManager.BroadcastAuctionWSPriceUpdate(auction.ID, oldPrice, newPrice, timeRemaining)
+			logger.Info("auction", fmt.Sprintf("已广播价格更新: 拍卖ID %d, 旧价格 %.2f, 新价格 %.2f, 剩余时间 %d秒\n",
+				auction.ID, oldPrice, newPrice, timeRemaining))
+		} else {
+			logger.Info("auction", "WebSocket管理器未初始化，跳过价格广播\n")
+		}
 	} else if newPrice > auction.CurrentPrice {
 		// 记录价格异常上涨的情况
 		logger.Info("auction", fmt.Sprintf("价格更新异常：计算价格 %.2f 高于当前价格 %.2f，跳过更新\n", newPrice, auction.CurrentPrice))
@@ -912,8 +1012,8 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// 更新拍卖状态
 	currentTime = timeservice.SyncNow()
 	_, err = tx.Exec(`
-		UPDATE auctions 
-		SET status = 'active', start_time = ?, end_time = ?, current_price = ?, updated_at = ? 
+		UPDATE auctions
+		SET status = 'active', start_time = ?, end_time = ?, current_price = ?, updated_at = ?
 		WHERE id = ?`,
 		startTimeValue, endTimeValue, auction.InitialPrice, currentTime, data.AuctionID)
 	if err != nil {
@@ -1011,8 +1111,8 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("auction", fmt.Sprintf("启动荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", updatedAuction.ID, updatedAuction.ItemType, updatedAuction.Quantity))
 
-	// 启动价格递减定时器
-	StartAuctionPriceDecrementTimer(db)
+	// 为该拍卖启动独立的价格递减定时器
+	StartAuctionPriceDecrementTimer(db, data.AuctionID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1356,8 +1456,8 @@ func CommitAuctionBid(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("auction", fmt.Sprintf("提交荷兰钟竞价成功，ID: %d，价格: %.2f，物品类型: %s，数量: %d\n", newBid.ID, currentPrice, auction.ItemType, auction.Quantity))
 
-	// 停止价格递减定时器
-	StopAuctionPriceDecrementTimer()
+	// 停止该拍卖的价格递减定时器
+	StopAuctionPriceDecrementTimerByID(bid.AuctionID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1509,8 +1609,8 @@ func CancelAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("auction", fmt.Sprintf("取消荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", auction.ID, auction.ItemType, auction.Quantity))
 
-	// 停止价格递减定时器
-	StopAuctionPriceDecrementTimer()
+	// 停止该拍卖的价格递减定时器
+	StopAuctionPriceDecrementTimerByID(data.AuctionID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1841,8 +1941,8 @@ func UpdateAuctionPrices(db *sql.DB) {
 		if auction.StartTime == nil {
 			continue
 		}
-		elapsed := currentTime.Sub(*auction.StartTime)
-		intervals := int(elapsed.Seconds()) / auction.DecrementInterval
+		duration := currentTime.Sub(*auction.StartTime)
+		intervals := int(duration.Seconds()) / auction.DecrementInterval
 		newPrice := auction.InitialPrice - float64(intervals)*auction.PriceDecrement
 
 		// 确保价格不低于最低价格
