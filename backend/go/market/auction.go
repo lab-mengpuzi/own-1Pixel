@@ -45,19 +45,62 @@ type Auction struct {
 	EndTime           *time.Time    `json:"endTime"`           // 结束时间
 	Status            string        `json:"status"`            // 状态：pending, active, completed, cancelled
 	WinnerID          sql.NullInt64 `json:"winnerId"`          // 中标者ID（用户ID）
-	CreatedAt         time.Time     `json:"created_at"`        // 创建时间
-	UpdatedAt         time.Time     `json:"updated_at"`        // 更新时间
+	CreatedAt         sql.NullTime  `json:"created_at"`        // 创建时间
+	UpdatedAt         sql.NullTime  `json:"updated_at"`        // 更新时间
+}
+
+// MarshalJSON 自定义JSON序列化，处理sql.NullTime和sql.NullInt64类型
+func (a Auction) MarshalJSON() ([]byte, error) {
+	type Alias Auction
+	var createdAt, updatedAt interface{} = nil, nil
+	if a.CreatedAt.Valid {
+		createdAt = a.CreatedAt.Time
+	}
+	if a.UpdatedAt.Valid {
+		updatedAt = a.UpdatedAt.Time
+	}
+	var winnerId interface{} = nil
+	if a.WinnerID.Valid {
+		winnerId = a.WinnerID.Int64
+	}
+	return json.Marshal(&struct {
+		CreatedAt interface{} `json:"created_at"`
+		UpdatedAt interface{} `json:"updated_at"`
+		WinnerId  interface{} `json:"winnerId"`
+		*Alias
+	}{
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+		WinnerId:  winnerId,
+		Alias:     (*Alias)(&a),
+	})
 }
 
 // 荷兰钟竞价记录
 type AuctionBid struct {
-	ID        int       `json:"id"`
-	AuctionID int       `json:"auctionId"` //
-	UserID    int       `json:"userId"`
-	Price     float64   `json:"price"`
-	Quantity  int       `json:"quantity"`
-	Status    string    `json:"status"` // 状态：pending, accepted, rejected
-	CreatedAt time.Time `json:"created_at"`
+	ID        int          `json:"id"`
+	AuctionID int          `json:"auctionId"` //
+	UserID    int          `json:"userId"`
+	Price     float64      `json:"price"`
+	Quantity  int          `json:"quantity"`
+	Status    string       `json:"status"` // 状态：pending, accepted, rejected
+	CreatedAt sql.NullTime `json:"created_at"`
+}
+
+// MarshalJSON 自定义JSON序列化，处理sql.NullTime类型
+func (ab AuctionBid) MarshalJSON() ([]byte, error) {
+	type Alias AuctionBid
+	var createdAt interface{} = nil
+	if ab.CreatedAt.Valid {
+		createdAt = ab.CreatedAt.Time
+	}
+	return json.Marshal(&struct {
+		CreatedAt interface{} `json:"created_at"`
+		*Alias
+	}{
+		CreatedAt: createdAt,
+		Alias:     (*Alias)(&ab),
+	})
 }
 
 // 初始化荷兰钟拍卖数据库表
@@ -760,8 +803,8 @@ func GetAuctions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			EndTime:           auction.EndTime,
 			Status:            auction.Status,
 			WinnerID:          winnerIDPtr,
-			CreatedAt:         auction.CreatedAt,
-			UpdatedAt:         auction.UpdatedAt,
+			CreatedAt:         auction.CreatedAt.Time,
+			UpdatedAt:         auction.UpdatedAt.Time,
 		}
 
 		jsonAuctions = append(jsonAuctions, jsonAuction)
@@ -891,8 +934,8 @@ func GetAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		EndTime:           auction.EndTime,
 		Status:            auction.Status,
 		WinnerID:          winnerIDPtr,
-		CreatedAt:         auction.CreatedAt,
-		UpdatedAt:         auction.UpdatedAt,
+		CreatedAt:         auction.CreatedAt.Time,
+		UpdatedAt:         auction.UpdatedAt.Time,
 	}
 
 	logger.Info("auction", fmt.Sprintf("获取单个荷兰钟拍卖成功，ID: %d，物品类型: %s\n", auction.ID, auction.ItemType))
@@ -1105,8 +1148,8 @@ func StartAuction(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		EndTime:           updatedAuction.EndTime,
 		Status:            updatedAuction.Status,
 		WinnerID:          winnerIDPtr,
-		CreatedAt:         updatedAuction.CreatedAt,
-		UpdatedAt:         updatedAuction.UpdatedAt,
+		CreatedAt:         updatedAuction.CreatedAt.Time,
+		UpdatedAt:         updatedAuction.UpdatedAt.Time,
 	}
 
 	logger.Info("auction", fmt.Sprintf("启动荷兰钟拍卖成功，ID: %d，物品类型: %s，数量: %d\n", updatedAuction.ID, updatedAuction.ItemType, updatedAuction.Quantity))
@@ -1709,8 +1752,8 @@ func GetSellerAuctions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			EndTime:           auction.EndTime,
 			Status:            auction.Status,
 			WinnerID:          winnerIDPtr,
-			CreatedAt:         auction.CreatedAt,
-			UpdatedAt:         auction.UpdatedAt,
+			CreatedAt:         auction.CreatedAt.Time,
+			UpdatedAt:         auction.UpdatedAt.Time,
 		}
 
 		jsonAuctions = append(jsonAuctions, jsonAuction)
