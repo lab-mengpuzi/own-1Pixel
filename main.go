@@ -87,32 +87,32 @@ func getMarketItems(w http.ResponseWriter, r *http.Request) {
 
 // 制作苹果
 func makeApple(w http.ResponseWriter, r *http.Request) {
-	market.MakeItem(dbConn, w, r, "apple")
+	market.MakeItem(dbConn, w, r, market.ItemTypeApple)
 }
 
 // 制作木材
 func makeWood(w http.ResponseWriter, r *http.Request) {
-	market.MakeItem(dbConn, w, r, "wood")
+	market.MakeItem(dbConn, w, r, market.ItemTypeWood)
 }
 
 // 卖出苹果
 func sellApple(w http.ResponseWriter, r *http.Request) {
-	market.SellItem(dbConn, w, r, "apple")
+	market.SellItem(dbConn, w, r, market.ItemTypeApple)
 }
 
 // 卖出木材
 func sellWood(w http.ResponseWriter, r *http.Request) {
-	market.SellItem(dbConn, w, r, "wood")
+	market.SellItem(dbConn, w, r, market.ItemTypeWood)
 }
 
 // 买入苹果
 func buyApple(w http.ResponseWriter, r *http.Request) {
-	market.BuyItem(dbConn, w, r, "apple")
+	market.BuyItem(dbConn, w, r, market.ItemTypeApple)
 }
 
 // 买入木材
 func buyWood(w http.ResponseWriter, r *http.Request) {
-	market.BuyItem(dbConn, w, r, "wood")
+	market.BuyItem(dbConn, w, r, market.ItemTypeWood)
 }
 
 // 创建荷兰钟拍卖

@@ -12,6 +12,31 @@ import (
 	"own-1Pixel/backend/go/timeservice"
 )
 
+// 物品类型枚举
+type ItemType string
+
+const (
+	ItemTypeApple ItemType = "apple"
+	ItemTypeWood  ItemType = "wood"
+)
+
+// 翻译物品类型名称
+func (it ItemType) translateName(language string) string {
+	switch language {
+	case "中文":
+		switch it {
+		case ItemTypeApple:
+			return "苹果"
+		case ItemTypeWood:
+			return "木材"
+		default:
+			return string(it)
+		}
+	default:
+		return string(it)
+	}
+}
+
 // 市场参数结构
 type MarketParams struct {
 	ID               int       `json:"id"`
@@ -413,7 +438,7 @@ func CalculateNewPrice(currentPrice float64, stock int, params MarketParams, bas
 }
 
 // 制作物品
-func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType ItemType) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var currentTime time.Time
@@ -447,9 +472,9 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 
 	// 根据物品类型更新背包
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		backpack.Apple++
-	case "wood":
+	case ItemTypeWood:
 		backpack.Wood++
 	default:
 		logger.Info("market", fmt.Sprintf("制作物品失败，无效的物品类型: %s\n", itemType))
@@ -493,9 +518,9 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	// 添加交易记录，收入和支出都为0，备注为制作苹果或制作木材
 	note := ""
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		note = "制作苹果"
-	case "wood":
+	case ItemTypeWood:
 		note = "制作木材"
 	}
 
@@ -539,7 +564,7 @@ func MakeItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 }
 
 // 卖出物品
-func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType ItemType) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var currentTime time.Time
@@ -572,7 +597,7 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	}
 
 	// 检查背包中是否有足够的物品
-	if itemType == "apple" && backpack.Apple <= 0 {
+	if itemType == ItemTypeApple && backpack.Apple <= 0 {
 		logger.Info("market", "卖出物品失败，背包中没有苹果\n")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -580,7 +605,7 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 			"message": "卖出物品失败，背包中没有苹果",
 		})
 		return
-	} else if itemType == "wood" && backpack.Wood <= 0 {
+	} else if itemType == ItemTypeWood && backpack.Wood <= 0 {
 		logger.Info("market", "卖出物品失败，背包中没有木材\n")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -593,10 +618,10 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 	// 获取当前市场物品
 	var item MarketItem
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		err = db.QueryRow("SELECT id, name, price, stock, base_price, created_at, updated_at FROM market_items WHERE name = 'apple'").Scan(
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
-	case "wood":
+	case ItemTypeWood:
 		err = db.QueryRow("SELECT id, name, price, stock, base_price, created_at, updated_at FROM market_items WHERE name = 'wood'").Scan(
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 	default:
@@ -655,9 +680,9 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 
 	// 更新背包
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		backpack.Apple--
-	case "wood":
+	case ItemTypeWood:
 		backpack.Wood--
 	default:
 		logger.Info("market", fmt.Sprintf("卖出物品失败，无效的物品类型: %s\n", itemType))
@@ -815,7 +840,7 @@ func SellItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType strin
 }
 
 // 买入物品
-func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string) {
+func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType ItemType) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var currentTime time.Time
@@ -835,7 +860,7 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 	// 获取当前市场物品
 	var item MarketItem
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		err := db.QueryRow("SELECT id, name, price, stock, base_price, created_at, updated_at FROM market_items WHERE name = 'apple'").Scan(
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 		if err != nil {
@@ -848,7 +873,7 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 			})
 			return
 		}
-	case "wood":
+	case ItemTypeWood:
 		err := db.QueryRow("SELECT id, name, price, stock, base_price, created_at, updated_at FROM market_items WHERE name = 'wood'").Scan(
 			&item.ID, &item.Name, &item.Price, &item.Stock, &item.BasePrice, &item.CreatedAt, &item.UpdatedAt)
 		if err != nil {
@@ -877,7 +902,7 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"message": fmt.Sprintf("库存中没有%s", itemType),
+			"message": fmt.Sprintf("库存中没有%s", ItemType(itemType).translateName("中文")),
 		})
 		return
 	}
@@ -943,9 +968,9 @@ func BuyItem(db *sql.DB, w http.ResponseWriter, r *http.Request, itemType string
 
 	// 更新背包
 	switch itemType {
-	case "apple":
+	case ItemTypeApple:
 		backpack.Apple++
-	case "wood":
+	case ItemTypeWood:
 		backpack.Wood++
 	default:
 		logger.Info("market", fmt.Sprintf("买入物品失败，无效的物品类型: %s\n", itemType))
