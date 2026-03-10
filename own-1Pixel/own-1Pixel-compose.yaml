@@ -1,0 +1,16 @@
+services:
+  own-1Pixel:
+    container_name: own-1Pixel
+    image: golang:1.25.0
+    working_dir: /app
+    command: ["/app/own-1Pixel.linux-amd64"]
+    volumes:
+      - ./:/app
+    ports:
+      - "8080:8080"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
