@@ -235,13 +235,13 @@ function updateMarketUI() {
     
     // 更新苹果市场状态
     if (appleMarketStatus) {
-        let status = '稳定';
+        let status = '供求平衡';
         let statusClass = 'text-success';
         
         if (marketItems.apple.stock > 10) {
             status = '供过于求';
             statusClass = 'text-danger';
-        } else if (marketItems.apple.stock < 5) {
+        } else if (marketItems.apple.stock < 5 && marketItems.apple.stock > 0) {
             status = '供不应求';
             statusClass = 'text-warning';
         }
@@ -276,13 +276,13 @@ function updateMarketUI() {
     
     // 更新木材市场状态
     if (woodMarketStatus) {
-        let status = '稳定';
+        let status = '供求平衡';
         let statusClass = 'text-success';
         
         if (marketItems.wood.stock > 10) {
             status = '供过于求';
             statusClass = 'text-danger';
-        } else if (marketItems.wood.stock < 5) {
+        } else if (marketItems.wood.stock < 5 && marketItems.wood.stock > 0) {
             status = '供不应求';
             statusClass = 'text-warning';
         }
