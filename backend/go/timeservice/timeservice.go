@@ -39,7 +39,7 @@ type TimeServiceNTPServer struct {
 // TimeServiceNTPSample NTP样本
 type TimeServiceNTPSample struct {
 	Timestamp int64   // 时间戳（纳秒）
-	Status    string  // 样本状态：成功、失败
+	Status    string  // 样本状态：Success、Failed
 	RTT       int64   // 往返时间（纳秒）
 	Deviation float64 // 偏差（纳秒）
 }
@@ -148,7 +148,7 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 			// 记录详细错误信息
 			logger.Info("TimeService", fmt.Sprintf("NTP查询失败 - 服务器：%s，样本：%d，错误：%v\n", server.Address, i+1, err))
 
-			// 添加失败样本，状态为"失败"
+			// 添加失败样本，状态为"Failed"
 			samples = append(samples, TimeServiceNTPSample{
 				Timestamp: systemTimestampBase, // 使用系统时间戳
 				Status:    "Failed",            // 设置状态为失败
@@ -167,7 +167,7 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 			// 记录无效源错误
 			logger.Info("TimeService", fmt.Sprintf("NTP查询返回无效源 - 服务器：%s，样本：%d，Stratum：0\n", server.Address, i+1))
 
-			// 添加无效源样本，状态为"失败"
+			// 添加无效源样本，状态为"Failed"
 			samples = append(samples, TimeServiceNTPSample{
 				Timestamp: systemTimestampBase, // 使用系统时间戳
 				Status:    "Failed",            // 设置状态为失败
@@ -185,7 +185,7 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 		// 计算偏差（系统时间快于NTP时间为正偏差，系统时间慢于NTP时间为负偏差）
 		deviation := float64(ntpResult.Time.UnixNano() - systemTimestampBase)
 
-		// 添加成功样本，状态为"成功"
+		// 添加成功样本，状态为"Success"
 		samples = append(samples, TimeServiceNTPSample{
 			Timestamp: ntpResult.Time.UnixNano(),   // 使用NTP服务器返回的时间戳
 			Status:    "Success",                   // 设置状态为成功
@@ -213,11 +213,11 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 	}
 
 	// 初始化变量，确保在所有代码路径中都有定义
-	var firstTimestamp int64   // 修改：使用第一个成功样本的时间戳
-	var firstAddress string    // 修改：使用第一个成功样本的地址
-	var firstWeight float64    // 修改：使用第一个成功样本的权重
-	var firstRTT float64       // 修改：使用第一个成功样本的RTT
-	var firstDeviation float64 // 修改：使用第一个成功样本的偏差
+	var firstTimestamp int64   // 使用第一个成功样本的时间戳
+	var firstAddress string    // 使用第一个成功样本的地址
+	var firstWeight float64    // 使用第一个成功样本的权重
+	var firstRTT float64       // 使用第一个成功样本的RTT
+	var firstDeviation float64 // 使用第一个成功样本的偏差
 
 	// 记录采样完成后的综合日志，包含失败和无效源统计
 	if len(samples) > 0 {
@@ -241,11 +241,11 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 		// 查找第一个成功样本的时间戳、偏差和RTT
 		for i := 0; i < len(samples); i++ {
 			if samples[i].Status == "Success" {
-				firstTimestamp = samples[i].Timestamp // 修改：使用第一个成功样本的时间戳
-				firstAddress = server.Address         // 修改：使用第一个成功样本的地址
-				firstWeight = server.Weight           // 修改：使用第一个成功样本的权重
-				firstRTT = float64(samples[i].RTT)    // 修改：使用第一个成功样本的RTT
-				firstDeviation = samples[i].Deviation // 修改：使用第一个成功样本的偏差
+				firstTimestamp = samples[i].Timestamp // 使用第一个成功样本的时间戳
+				firstAddress = server.Address         // 使用第一个成功样本的地址
+				firstWeight = server.Weight           // 使用第一个成功样本的权重
+				firstRTT = float64(samples[i].RTT)    // 使用第一个成功样本的RTT
+				firstDeviation = samples[i].Deviation // 使用第一个成功样本的偏差
 				break
 			}
 		}
@@ -302,11 +302,11 @@ func querySingleSyncTime(server TimeServiceNTPServer) (TimeServiceNTPResult, err
 
 	// 正常情况：有成功样本
 	result := TimeServiceNTPResult{
-		Timestamp:    firstTimestamp, // 修改：使用第一个成功样本的时间戳
-		Address:      firstAddress,   // 修改：使用第一个成功样本的地址
-		Weight:       firstWeight,    // 修改：使用第一个成功样本的权重
-		RTT:          firstRTT,       // 修改：使用第一个成功样本的RTT
-		Deviation:    firstDeviation, // 修改：使用第一个成功样本的偏差
+		Timestamp:    firstTimestamp, // 使用第一个成功样本的时间戳
+		Address:      firstAddress,   // 使用第一个成功样本的地址
+		Weight:       firstWeight,    // 使用第一个成功样本的权重
+		RTT:          firstRTT,       // 使用第一个成功样本的RTT
+		Deviation:    firstDeviation, // 使用第一个成功样本的偏差
 		SampleCount:  len(samples),
 		SuccessCount: successCount,
 	}

@@ -10,6 +10,7 @@ import (
 
 	"own-1Pixel/backend/go/logger"
 	"own-1Pixel/backend/go/timeservice"
+	"own-1Pixel/backend/go/timeservice/clock"
 )
 
 // 全局变量，用于存储每个拍卖的定时器
@@ -79,7 +80,7 @@ func (a Auction) MarshalJSON() ([]byte, error) {
 // 荷兰钟竞价记录
 type AuctionBid struct {
 	ID        int          `json:"id"`
-	AuctionID int          `json:"auctionId"` //
+	AuctionID int          `json:"auctionId"`
 	UserID    int          `json:"userId"`
 	Price     float64      `json:"price"`
 	Quantity  int          `json:"quantity"`
@@ -345,11 +346,11 @@ func updateAuctionPrice(db *sql.DB, auction Auction) {
 
 	// 添加详细调试日志
 	currentTime = timeservice.SyncNow()
-	now := time.Now() // 使用系统时间,而不是 timeservice.SyncNow()
+	now := clock.Now()
 	logger.Info("auction", fmt.Sprintf("拍卖ID %d 时间详情: currentTime=%v, now=%v, startTime=%v, duration=%.2fs, intervalsPassed=%d, priceDecrement=%.2f, currentPrice=%.2f\n",
 		auction.ID, currentTime.Format("15:04:05.000"), now.Format("15:04:05.000"), auction.StartTime.Format("15:04:05.000"), duration.Seconds(), intervalsPassed, auction.PriceDecrement, auction.CurrentPrice))
 
-	// 使用拍卖自身配置的价格递减量，而不是硬编码的1.0
+	// 使用拍卖自身配置的价格递减量
 	totalDecrement := float64(intervalsPassed) * auction.PriceDecrement
 
 	// 计算新的当前价格

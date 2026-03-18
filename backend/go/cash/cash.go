@@ -33,7 +33,7 @@ type Transaction struct {
 // 余额信息结构
 type Balance struct {
 	ID        int       `json:"id"`
-	Amount    float64   `json:"amount"`
+	Amount    float64   `json:"amount"`     // 余额
 	UpdatedAt time.Time `json:"updated_at"` // 更新时间
 }
 

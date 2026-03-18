@@ -410,7 +410,7 @@ func CalculateNewPrice(currentPrice float64, stock int, params MarketParams, bas
 		shortage := float64(int(balanceRange) - stock)
 		priceChange = shortage * params.PriceFluctuation * 0.1
 	} else {
-		// 供需平衡，价格不变
+		// 供求平衡，价格不变
 		return currentPrice
 	}
 

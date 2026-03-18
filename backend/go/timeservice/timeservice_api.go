@@ -106,7 +106,7 @@ func GetSyncTime(w http.ResponseWriter, r *http.Request) {
 	// 构建响应
 	response := TimeServiceASyncTimeResponse{
 		SystemTime:     systemTimeFormatted,
-		SyncTimestamp:  syncTimestamp.UnixNano(), // 修正：直接使用UnixNano()获取纳秒级时间戳
+		SyncTimestamp:  syncTimestamp.UnixNano(),
 		SyncTime:       syncTimeFormatted,
 		SyncTimeOffset: syncTimeOffset,
 		IsDegraded:     isDegraded,
