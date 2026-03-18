@@ -117,7 +117,7 @@ var config = Config{
 // 全局配置实例
 var globalConfig *Config
 
-// InitConfig 初始化全局配置实例（仅在main.go中调用一次）
+// InitConfig 初始化全局配置实例
 func InitConfig() Config {
 	// 加载配置文件
 	_config, err := LoadConfig()
@@ -131,7 +131,7 @@ func InitConfig() Config {
 	return _config
 }
 
-// GetConfig 获取全局配置实例（供其他模块使用）
+// GetConfig 获取全局配置实例
 func GetConfig() *Config {
 	if globalConfig == nil {
 		// 如果全局配置未初始化，使用默认配置
