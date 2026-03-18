@@ -29,5 +29,6 @@ C:\own-1Pixel>$GOARCH = "amd64"; $env:GOARCH=$GOARCH; $env:GOOS="windows"; go bu
 Docker -> deploy
 
 ```bash
+own-1Pixel$ # Build BINARY to own-1Pixel/own-1Pixel.linux-amd64
 own-1Pixel$ docker-compose -f own-1Pixel-compose.yaml up -d
 ```
