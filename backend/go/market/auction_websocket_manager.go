@@ -141,7 +141,7 @@ func (auctionWSManager *AuctionWSManager) auctionHeartbeatLoop(conn *websocket.C
 	auctionWebSocket := _config.AuctionWebSocket
 
 	// 设置心跳间隔，比读取超时提前一些
-	heartbeatInterval := auctionWebSocket.PingInterval
+	heartbeatInterval := auctionWebSocket.HeartbeatInterval
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 

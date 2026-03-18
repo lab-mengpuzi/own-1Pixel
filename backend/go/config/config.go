@@ -46,10 +46,10 @@ type MarketConfig struct {
 
 // AuctionWebSocketConfig 拍卖系统WebSocket配置
 type AuctionWebSocketConfig struct {
-	ReadLimit    int           `json:"readLimit"`    // 读取消息大小限制
-	ReadTimeout  time.Duration `json:"readTimeout"`  // 读取超时时间
-	PingInterval time.Duration `json:"pingInterval"` // 心跳间隔
-	WriteTimeout time.Duration `json:"writeTimeout"` // 写入超时时间
+	ReadLimit         int           `json:"readLimit"`         // 读取消息大小限制
+	ReadTimeout       time.Duration `json:"readTimeout"`       // 读取超时时间
+	HeartbeatInterval time.Duration `json:"heartbeatInterval"` // 心跳间隔
+	WriteTimeout      time.Duration `json:"writeTimeout"`      // 写入超时时间
 }
 
 // TimeServiceConfig 时间服务配置
@@ -93,10 +93,10 @@ var config = Config{
 		DefaultMaxChange:   1.0, // 默认最大变动系数
 	},
 	AuctionWebSocket: AuctionWebSocketConfig{
-		ReadLimit:    512,              // 读取消息大小限制
-		ReadTimeout:  45 * time.Second, // 读取超时时间
-		PingInterval: 25 * time.Second, // 心跳间隔
-		WriteTimeout: 45 * time.Second, // 写入超时时间
+		ReadLimit:         512,              // 读取消息大小限制
+		ReadTimeout:       45 * time.Second, // 读取超时时间
+		HeartbeatInterval: 25 * time.Second, // 心跳间隔
+		WriteTimeout:      45 * time.Second, // 写入超时时间
 	},
 	TimeService: TimeServiceConfig{
 		FailureThreshold: 5,                      // 失败阈值，同样本数量一致
